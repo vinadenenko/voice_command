@@ -36,6 +36,7 @@ class VoiceCommandConan(ConanFile):
             self.options.rm_safe("fPIC")
 
     def configure(self):
+        self.options["whisper-cpp"].shared=True
         if self.options.shared:
             self.options.rm_safe("fPIC")
 

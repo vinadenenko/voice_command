@@ -1,565 +1,798 @@
-// Include system headers first
-#include "earth_map/renderer/renderer.h"
-#include "earth_map/renderer/tile_renderer.h"
-#include <iostream>
-#include <exception>
-#include <chrono>
-#include <thread>
-#include <iomanip>
+// #include <spdlog/spdlog.h>
 
-// Include GLEW before GLFW to avoid conflicts
-#include <GL/glew.h>
-#include <GLFW/glfw3.h>
 
-// Then include earth_map headers
-#include <earth_map/earth_map.h>
-#include <earth_map/constants.h>
-#include <earth_map/core/camera_controller.h>
-#include <earth_map/platform/library_info.h>
-#include <earth_map/coordinates/coordinate_mapper.h>
-#include <earth_map/coordinates/coordinate_spaces.h>
-#include <spdlog/spdlog.h>
-#include <glm/glm.hpp>
+
+#include "common-sdl.h"
+#include "common.h"
+#include "whisper.h"
+#include "grammar-parser.h"
+
 #include <algorithm>
-#include <cmath>
+#include <chrono>
+#include <cstdio>
+#include <fstream>
+#include <map>
+#include <sstream>
+#include <string>
+#include <thread>
 #include <vector>
-#include <iomanip>
 
-// Global variables for mouse interaction
-static double last_mouse_x = 0.0;
-static double last_mouse_y = 0.0;
-static bool mouse_dragging = false;
-static earth_map::EarthMap* g_earth_map_instance = nullptr;
-static bool show_help = true;
-static bool show_overlay = true;
+// command-line parameters
+struct whisper_params {
+    int32_t n_threads  = std::min(4, (int32_t) std::thread::hardware_concurrency());
+    int32_t prompt_ms  = 5000;
+    int32_t command_ms = 8000;
+    int32_t capture_id = -1;
+    int32_t max_tokens = 32;
+    int32_t audio_ctx  = 0;
 
-// Double-click detection
-static double last_click_time = 0.0;
-static constexpr double DOUBLE_CLICK_THRESHOLD = 0.3; // seconds
+    float vad_thold  = 0.6f;
+    float freq_thold = 100.0f;
 
-// Movement state is now handled entirely by the library's Camera class.
-// WASD key events are forwarded via ProcessInput() which sets internal
-// movement impulses, and UpdateMovement() applies them with constraint
-// enforcement. No external movement_state needed.
+    float grammar_penalty = 100.0f;
 
-// Helper function to print camera controls
-void print_help() {
-    std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
-    std::cout << "║          EARTH MAP - CAMERA CONTROLS                       ║\n";
-    std::cout << "╠════════════════════════════════════════════════════════════╣\n";
-    std::cout << "║ Mouse Controls:                                            ║\n";
-    std::cout << "║   Left Mouse + Drag   : Rotate camera view                 ║\n";
-    std::cout << "║   Middle Mouse + Drag : Tilt camera (pitch/heading)        ║\n";
-    std::cout << "║   Double Click        : Zoom to clicked location           ║\n";
-    std::cout << "║   Scroll Wheel        : Zoom in/out                        ║\n";
-    std::cout << "║                                                            ║\n";
-    std::cout << "║ Keyboard Controls:                                         ║\n";
-    std::cout << "║   W / S             : Move forward / backward (FREE mode)  ║\n";
-    std::cout << "║   A / D             : Move left / right (FREE mode)        ║\n";
-    std::cout << "║   Q / E             : Move up / down (FREE mode)           ║\n";
-    std::cout << "║   F                 : Toggle camera mode (FREE/ORBIT)      ║\n";
-    std::cout << "║   M                 : Toggle mini-map                       ║\n";
-    std::cout << "║   R                 : Reset camera to default view         ║\n";
-    std::cout << "║   1                 : Jump to Himalayas (SRTM data region) ║\n";
-    std::cout << "║   O                 : Toggle debug overlay                 ║\n";
-    std::cout << "║   H                 : Toggle this help text                ║\n";
-    std::cout << "║   ESC               : Exit application                     ║\n";
-    std::cout << "║                                                            ║\n";
-    std::cout << "║ Camera Modes:                                              ║\n";
-    std::cout << "║   FREE   : Free-flying camera with WASD movement           ║\n";
-    std::cout << "║   ORBIT  : Orbit around Earth center (no WASD)             ║\n";
-    std::cout << "╚════════════════════════════════════════════════════════════╝\n\n";
+    grammar_parser::parse_state grammar_parsed;
+
+    bool translate     = false;
+    bool print_special = false;
+    bool print_energy  = false;
+    bool no_timestamps = true;
+    bool use_gpu       = true;
+    bool flash_attn    = true;
+
+    std::string language  = "en";
+    std::string model     = "models/ggml-base.en.bin";
+    std::string fname_out;
+    std::string commands;
+    std::string prompt;
+    std::string context;
+    std::string grammar;
+
+    // A regular expression that matches tokens to suppress
+    std::string suppress_regex;
+};
+
+void whisper_print_usage(int argc, char ** argv, const whisper_params & params);
+
+static bool whisper_params_parse(int argc, char ** argv, whisper_params & params) {
+    for (int i = 1; i < argc; i++) {
+        std::string arg = argv[i];
+
+        if (arg == "-h" || arg == "--help") {
+            whisper_print_usage(argc, argv, params);
+            exit(0);
+        }
+        else if (arg == "-t"     || arg == "--threads")       { params.n_threads     = std::stoi(argv[++i]); }
+        else if (arg == "-pms"   || arg == "--prompt-ms")     { params.prompt_ms     = std::stoi(argv[++i]); }
+        else if (arg == "-cms"   || arg == "--command-ms")    { params.command_ms    = std::stoi(argv[++i]); }
+        else if (arg == "-c"     || arg == "--capture")       { params.capture_id    = std::stoi(argv[++i]); }
+        else if (arg == "-mt"    || arg == "--max-tokens")    { params.max_tokens    = std::stoi(argv[++i]); }
+        else if (arg == "-ac"    || arg == "--audio-ctx")     { params.audio_ctx     = std::stoi(argv[++i]); }
+        else if (arg == "-vth"   || arg == "--vad-thold")     { params.vad_thold     = std::stof(argv[++i]); }
+        else if (arg == "-fth"   || arg == "--freq-thold")    { params.freq_thold    = std::stof(argv[++i]); }
+        else if (arg == "-tr"    || arg == "--translate")     { params.translate     = true; }
+        else if (arg == "-ps"    || arg == "--print-special") { params.print_special = true; }
+        else if (arg == "-pe"    || arg == "--print-energy")  { params.print_energy  = true; }
+        else if (arg == "-ng"    || arg == "--no-gpu")        { params.use_gpu       = false; }
+        else if (arg == "-fa"    || arg == "--flash-attn")    { params.flash_attn    = true; }
+        else if (arg == "-nfa"   || arg == "--no-flash-attn") { params.flash_attn    = false; }
+        else if (arg == "-l"     || arg == "--language")      { params.language      = argv[++i]; }
+        else if (arg == "-m"     || arg == "--model")         { params.model         = argv[++i]; }
+        else if (arg == "-f"     || arg == "--file")          { params.fname_out     = argv[++i]; }
+        else if (arg == "-cmd"   || arg == "--commands")      { params.commands      = argv[++i]; }
+        else if (arg == "-p"     || arg == "--prompt")        { params.prompt        = argv[++i]; }
+        else if (arg == "-ctx"   || arg == "--context")       { params.context       = argv[++i]; }
+        else if (                   arg == "--grammar")       { params.grammar       = argv[++i]; }
+        else if (                   arg == "--grammar-penalty") { params.grammar_penalty = std::stof(argv[++i]); }
+        else if (                   arg == "--suppress-regex") { params.suppress_regex = argv[++i]; }
+        else {
+            fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
+            whisper_print_usage(argc, argv, params);
+            exit(0);
+        }
+    }
+
+    return true;
 }
 
-// Callback function for window resize
-void framebuffer_size_callback(GLFWwindow* /*window*/, int width, int height) {
-    glViewport(0, 0, width, height);
+void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & params) {
+    fprintf(stderr, "\n");
+    fprintf(stderr, "usage: %s [options]\n", argv[0]);
+    fprintf(stderr, "\n");
+    fprintf(stderr, "options:\n");
+    fprintf(stderr, "  -h,         --help           [default] show this help message and exit\n");
+    fprintf(stderr, "  -t N,       --threads N      [%-7d] number of threads to use during computation\n", params.n_threads);
+    fprintf(stderr, "  -pms N,     --prompt-ms N    [%-7d] prompt duration in milliseconds\n",             params.prompt_ms);
+    fprintf(stderr, "  -cms N,     --command-ms N   [%-7d] command duration in milliseconds\n",            params.command_ms);
+    fprintf(stderr, "  -c ID,      --capture ID     [%-7d] capture device ID\n",                           params.capture_id);
+    fprintf(stderr, "  -mt N,      --max-tokens N   [%-7d] maximum number of tokens per audio chunk\n",    params.max_tokens);
+    fprintf(stderr, "  -ac N,      --audio-ctx N    [%-7d] audio context size (0 - all)\n",                params.audio_ctx);
+    fprintf(stderr, "  -vth N,     --vad-thold N    [%-7.2f] voice activity detection threshold\n",        params.vad_thold);
+    fprintf(stderr, "  -fth N,     --freq-thold N   [%-7.2f] high-pass frequency cutoff\n",                params.freq_thold);
+    fprintf(stderr, "  -tr,        --translate      [%-7s] translate from source language to english\n",   params.translate ? "true" : "false");
+    fprintf(stderr, "  -ps,        --print-special  [%-7s] print special tokens\n",                        params.print_special ? "true" : "false");
+    fprintf(stderr, "  -pe,        --print-energy   [%-7s] print sound energy (for debugging)\n",          params.print_energy ? "true" : "false");
+    fprintf(stderr, "  -ng,        --no-gpu         [%-7s] disable GPU\n",                                 params.use_gpu ? "false" : "true");
+    fprintf(stderr, "  -fa,        --flash-attn     [%-7s] enbale flash attention\n",                      params.flash_attn ? "true" : "false");
+    fprintf(stderr, "  -nfa,       --no-flash-attn  [%-7s] disable flash attention\n",                     params.flash_attn ? "false" : "true");
+    fprintf(stderr, "  -l LANG,    --language LANG  [%-7s] spoken language\n",                             params.language.c_str());
+    fprintf(stderr, "  -m FNAME,   --model FNAME    [%-7s] model path\n",                                  params.model.c_str());
+    fprintf(stderr, "  -f FNAME,   --file FNAME     [%-7s] text output file name\n",                       params.fname_out.c_str());
+    fprintf(stderr, "  -cmd FNAME, --commands FNAME [%-7s] text file with allowed commands\n",             params.commands.c_str());
+    fprintf(stderr, "  -p,         --prompt         [%-7s] the required activation prompt\n",              params.prompt.c_str());
+    fprintf(stderr, "  -ctx,       --context        [%-7s] sample text to help the transcription\n",       params.context.c_str());
+    fprintf(stderr, "  --grammar GRAMMAR            [%-7s] GBNF grammar to guide decoding\n",              params.grammar.c_str());
+    fprintf(stderr, "  --grammar-penalty N          [%-7.1f] scales down logits of nongrammar tokens\n",   params.grammar_penalty);
+    fprintf(stderr, "  --suppress-regex REGEX       [%-7s] regular expression matching tokens to suppress\n", params.suppress_regex.c_str());
+    fprintf(stderr, "\n");
 }
 
-// Keyboard callback
-void key_callback(GLFWwindow* window, int key, int /*scancode*/, int action, int /*mods*/) {
-    if (!g_earth_map_instance) return;
+static std::string transcribe(
+    whisper_context * ctx,
+    const whisper_params & params,
+    const std::vector<float> & pcmf32,
+    const std::string & grammar_rule,
+    float & logprob_min,
+    float & logprob_sum,
+    int & n_tokens,
+    int64_t & t_ms) {
+    const auto t_start = std::chrono::high_resolution_clock::now();
 
-    auto camera = g_earth_map_instance->GetCameraController();
-    if (!camera) return;
+    logprob_min = 0.0f;
+    logprob_sum = 0.0f;
+    n_tokens    = 0;
+    t_ms = 0;
 
-    // Handle key press events
-    if (action == GLFW_PRESS) {
-        switch (key) {
-            case GLFW_KEY_F: {
-                // Toggle camera mode
-                auto current_mode = camera->GetMovementMode();
-                if (current_mode == earth_map::CameraController::MovementMode::FREE) {
-                    camera->SetMovementMode(earth_map::CameraController::MovementMode::ORBIT);
-                    std::cout << "→ Camera Mode: ORBIT (orbiting around Earth)\n";
+    //whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+    whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_BEAM_SEARCH);
+
+    wparams.print_progress   = false;
+    wparams.print_special    = params.print_special;
+    wparams.print_realtime   = false;
+    wparams.print_timestamps = !params.no_timestamps;
+    wparams.translate        = params.translate;
+    wparams.no_context       = true;
+    wparams.no_timestamps    = params.no_timestamps;
+    wparams.single_segment   = true;
+    wparams.max_tokens       = params.max_tokens;
+    wparams.language         = params.language.c_str();
+    wparams.n_threads        = params.n_threads;
+
+    wparams.audio_ctx = params.audio_ctx;
+
+    wparams.temperature     = 0.4f;
+    wparams.temperature_inc = 1.0f;
+    wparams.greedy.best_of  = 5;
+
+    wparams.beam_search.beam_size = 5;
+
+    wparams.initial_prompt = params.context.data();
+
+    wparams.suppress_regex = params.suppress_regex.c_str();
+
+    const auto & grammar_parsed = params.grammar_parsed;
+    auto grammar_rules = grammar_parsed.c_rules();
+
+    if (!params.grammar_parsed.rules.empty() && !grammar_rule.empty()) {
+        if (grammar_parsed.symbol_ids.find(grammar_rule) == grammar_parsed.symbol_ids.end()) {
+            fprintf(stderr, "%s: warning: grammar rule '%s' not found - skipping grammar sampling\n", __func__, grammar_rule.c_str());
+        } else {
+            wparams.grammar_rules   = grammar_rules.data();
+            wparams.n_grammar_rules = grammar_rules.size();
+            wparams.i_start_rule    = grammar_parsed.symbol_ids.at(grammar_rule);
+            wparams.grammar_penalty = params.grammar_penalty;
+        }
+    }
+
+    if (whisper_full(ctx, wparams, pcmf32.data(), pcmf32.size()) != 0) {
+        return "";
+    }
+
+    std::string result;
+
+    const int n_segments = whisper_full_n_segments(ctx);
+    for (int i = 0; i < n_segments; ++i) {
+        const char * text = whisper_full_get_segment_text(ctx, i);
+
+        result += text;
+
+        const int n = whisper_full_n_tokens(ctx, i);
+        for (int j = 0; j < n; ++j) {
+            const auto token = whisper_full_get_token_data(ctx, i, j);
+
+            if(token.plog > 0.0f) exit(0);
+            logprob_min = std::min(logprob_min, token.plog);
+            logprob_sum += token.plog;
+            ++n_tokens;
+        }
+    }
+
+    const auto t_end = std::chrono::high_resolution_clock::now();
+    t_ms = std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+
+    return result;
+}
+
+static std::vector<std::string> read_allowed_commands(const std::string & fname) {
+    std::vector<std::string> allowed_commands;
+
+    std::ifstream ifs(fname);
+    if (!ifs.is_open()) {
+        return allowed_commands;
+    }
+
+    std::string line;
+    while (std::getline(ifs, line)) {
+        line = ::trim(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        std::transform(line.begin(), line.end(),line.begin(), ::tolower);
+        allowed_commands.push_back(std::move(line));
+    }
+
+    return allowed_commands;
+}
+
+static std::vector<std::string> get_words(const std::string &txt) {
+    std::vector<std::string> words;
+
+    std::istringstream iss(txt);
+    std::string word;
+    while (iss >> word) {
+        words.push_back(word);
+    }
+
+    return words;
+}
+
+// command-list mode
+// guide the transcription to match the most likely command from a provided list
+static int process_command_list(struct whisper_context * ctx, audio_async &audio, const whisper_params &params, std::ofstream &fout) {
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: guided mode\n", __func__);
+
+    std::vector<std::string> allowed_commands = read_allowed_commands(params.commands);
+
+    if (allowed_commands.empty()) {
+        fprintf(stderr, "%s: error: failed to read allowed commands from '%s'\n", __func__, params.commands.c_str());
+        return 2;
+    }
+
+    int max_len = 0;
+
+    std::vector<std::vector<whisper_token>> allowed_tokens;
+
+    for (const auto & cmd : allowed_commands) {
+        whisper_token tokens[1024];
+        allowed_tokens.emplace_back();
+
+        for (int l = 0; l < (int) cmd.size(); ++l) {
+            // NOTE: very important to add the whitespace !
+            //       the reason is that the first decoded token starts with a whitespace too!
+            std::string ss = std::string(" ") + cmd.substr(0, l + 1);
+
+            const int n = whisper_tokenize(ctx, ss.c_str(), tokens, 1024);
+            if (n < 0) {
+                fprintf(stderr, "%s: error: failed to tokenize command '%s'\n", __func__, cmd.c_str());
+                return 3;
+            }
+
+            if (n == 1) {
+                allowed_tokens.back().push_back(tokens[0]);
+            }
+        }
+
+        max_len = std::max(max_len, (int) cmd.size());
+    }
+
+    fprintf(stderr, "%s: allowed commands [ tokens ]:\n", __func__);
+    fprintf(stderr, "\n");
+    for (int i = 0; i < (int) allowed_commands.size(); ++i) {
+        fprintf(stderr, "  - \033[1m%-*s\033[0m = [", max_len, allowed_commands[i].c_str());
+        for (const auto & token : allowed_tokens[i]) {
+            fprintf(stderr, " %5d", token);
+        }
+        fprintf(stderr, " ]\n");
+    }
+
+    std::string k_prompt = "select one from the available words: ";
+    for (int i = 0; i < (int) allowed_commands.size(); ++i) {
+        if (i > 0) {
+            k_prompt += ", ";
+        }
+        k_prompt += allowed_commands[i];
+    }
+    k_prompt += ". selected word: ";
+
+    // tokenize prompt
+    std::vector<whisper_token> k_tokens;
+    {
+        k_tokens.resize(1024);
+        const int n = whisper_tokenize(ctx, k_prompt.c_str(), k_tokens.data(), 1024);
+        if (n < 0) {
+            fprintf(stderr, "%s: error: failed to tokenize prompt '%s'\n", __func__, k_prompt.c_str());
+            return 4;
+        }
+        k_tokens.resize(n);
+    }
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: prompt: '%s'\n", __func__, k_prompt.c_str());
+    fprintf(stderr, "%s: tokens: [", __func__);
+    for (const auto & token : k_tokens) {
+        fprintf(stderr, " %d", token);
+    }
+    fprintf(stderr, " ]\n");
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: listening for a command ...\n", __func__);
+    fprintf(stderr, "\n");
+
+    bool is_running  = true;
+
+    std::vector<float> pcmf32_cur;
+    std::vector<float> pcmf32_prompt;
+
+    // main loop
+    while (is_running) {
+        // handle Ctrl + C
+        is_running = sdl_poll_events();
+
+        // delay
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        audio.get(2000, pcmf32_cur);
+
+        if (::vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
+            fprintf(stdout, "%s: Speech detected! Processing ...\n", __func__);
+
+            const auto t_start = std::chrono::high_resolution_clock::now();
+
+            whisper_full_params wparams = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
+
+            wparams.print_progress   = false;
+            wparams.print_special    = params.print_special;
+            wparams.print_realtime   = false;
+            wparams.print_timestamps = !params.no_timestamps;
+            wparams.translate        = params.translate;
+            wparams.no_context       = true;
+            wparams.single_segment   = true;
+            wparams.max_tokens       = 1;
+            wparams.language         = params.language.c_str();
+            wparams.n_threads        = params.n_threads;
+
+            wparams.audio_ctx        = params.audio_ctx;
+
+            wparams.prompt_tokens    = k_tokens.data();
+            wparams.prompt_n_tokens  = k_tokens.size();
+
+            // run the transformer and a single decoding pass
+            if (whisper_full(ctx, wparams, pcmf32_cur.data(), pcmf32_cur.size()) != 0) {
+                fprintf(stderr, "%s: ERROR: whisper_full() failed\n", __func__);
+                break;
+            }
+
+            // estimate command probability
+            // NOTE: not optimal
+            {
+                const auto * logits = whisper_get_logits(ctx);
+
+                std::vector<float> probs(whisper_n_vocab(ctx), 0.0f);
+
+                // compute probs from logits via softmax
+                {
+                    float max = -1e9;
+                    for (int i = 0; i < (int) probs.size(); ++i) {
+                        max = std::max(max, logits[i]);
+                    }
+
+                    float sum = 0.0f;
+                    for (int i = 0; i < (int) probs.size(); ++i) {
+                        probs[i] = expf(logits[i] - max);
+                        sum += probs[i];
+                    }
+
+                    for (int i = 0; i < (int) probs.size(); ++i) {
+                        probs[i] /= sum;
+                    }
+                }
+
+                std::vector<std::pair<float, int>> probs_id;
+
+                double psum = 0.0;
+                for (int i = 0; i < (int) allowed_commands.size(); ++i) {
+                    probs_id.emplace_back(probs[allowed_tokens[i][0]], i);
+                    for (int j = 1; j < (int) allowed_tokens[i].size(); ++j) {
+                        probs_id.back().first += probs[allowed_tokens[i][j]];
+                    }
+                    probs_id.back().first /= allowed_tokens[i].size();
+                    psum += probs_id.back().first;
+                }
+
+                // normalize
+                for (auto & p : probs_id) {
+                    p.first /= psum;
+                }
+
+                // sort descending
+                {
+                    using pair_type = decltype(probs_id)::value_type;
+                    std::sort(probs_id.begin(), probs_id.end(), [](const pair_type & a, const pair_type & b) {
+                        return a.first > b.first;
+                    });
+                }
+
+                // print the commands and the respective probabilities
+                {
+                    fprintf(stdout, "\n");
+                    for (const auto & cmd : probs_id) {
+                        fprintf(stdout, "%s: %s%-*s%s = %f | ", __func__, "\033[1m", max_len, allowed_commands[cmd.second].c_str(), "\033[0m", cmd.first);
+                        for (int token : allowed_tokens[cmd.second]) {
+                            fprintf(stdout, "'%4s' %f ", whisper_token_to_str(ctx, token), probs[token]);
+                        }
+                        fprintf(stdout, "\n");
+                    }
+                }
+
+                // best command
+                {
+                    const auto t_end = std::chrono::high_resolution_clock::now();
+
+                    const float prob = probs_id[0].first;
+                    const int index = probs_id[0].second;
+                    const char * best_command = allowed_commands[index].c_str();
+
+                    fprintf(stdout, "\n");
+                    fprintf(stdout, "%s: detected command: %s%s%s | p = %f | t = %d ms\n", __func__,
+                            "\033[1m", best_command, "\033[0m", prob,
+                            (int) std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count());
+                    fprintf(stdout, "\n");
+                    if (fout.is_open()) {
+                        fout << best_command << std::endl;
+                    }
+                }
+            }
+
+            audio.clear();
+        }
+    }
+
+    return 0;
+}
+
+// always-prompt mode
+// transcribe the voice into text after valid prompt
+static int always_prompt_transcription(struct whisper_context * ctx, audio_async & audio, const whisper_params & params, std::ofstream & fout) {
+    bool is_running = true;
+    bool ask_prompt = true;
+
+    float logprob_min = 0.0f;
+    float logprob_sum = 0.0f;
+    int   n_tokens    = 0;
+
+    std::vector<float> pcmf32_cur;
+
+    const std::string k_prompt = params.prompt;
+
+    const int k_prompt_length = get_words(k_prompt).size();
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: always-prompt mode\n", __func__);
+
+    // main loop
+    while (is_running) {
+        // handle Ctrl + C
+        is_running = sdl_poll_events();
+
+        // delay
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        if (ask_prompt) {
+            fprintf(stdout, "\n");
+            fprintf(stdout, "%s: The prompt is: '%s%s%s'\n", __func__, "\033[1m", k_prompt.c_str(), "\033[0m");
+            fprintf(stdout, "\n");
+
+            ask_prompt = false;
+        }
+
+        {
+            audio.get(2000, pcmf32_cur);
+
+            if (::vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
+                fprintf(stdout, "%s: Speech detected! Processing ...\n", __func__);
+
+                int64_t t_ms = 0;
+
+                // detect the commands
+                audio.get(params.command_ms, pcmf32_cur);
+
+                const auto txt = ::trim(::transcribe(ctx, params, pcmf32_cur, "", logprob_min, logprob_sum, n_tokens, t_ms));
+
+                const auto words = get_words(txt);
+
+                std::string prompt;
+                std::string command;
+
+                for (int i = 0; i < (int) words.size(); ++i) {
+                    if (i < k_prompt_length) {
+                        prompt += words[i] + " ";
+                    } else {
+                        command += words[i] + " ";
+                    }
+                }
+
+                const float sim = similarity(prompt, k_prompt);
+
+                //debug
+                //fprintf(stdout, "command size: %i\n", command_length);
+
+                if ((sim > 0.7f) && (command.size() > 0)) {
+                    fprintf(stdout, "%s: Command '%s%s%s', (t = %d ms)\n", __func__, "\033[1m", command.c_str(), "\033[0m", (int) t_ms);
+                    if (fout.is_open()) {
+                        fout << command << std::endl;
+                    }
+                }
+
+                fprintf(stdout, "\n");
+
+                audio.clear();
+            }
+        }
+    }
+
+    return 0;
+}
+
+// general-purpose mode
+// freely transcribe the voice into text
+static int process_general_transcription(struct whisper_context * ctx, audio_async & audio, const whisper_params & params, std::ofstream & fout) {
+    bool is_running  = true;
+    bool have_prompt = false;
+    bool ask_prompt  = true;
+
+    float logprob_min0 = 0.0f;
+    float logprob_min  = 0.0f;
+
+    float logprob_sum0 = 0.0f;
+    float logprob_sum  = 0.0f;
+
+    int n_tokens0 = 0;
+    int n_tokens  = 0;
+
+    std::vector<float> pcmf32_cur;
+    std::vector<float> pcmf32_prompt;
+
+    std::string k_prompt = "Ok Whisper, start listening for commands.";
+    if (!params.prompt.empty()) {
+        k_prompt = params.prompt;
+    }
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: general-purpose mode\n", __func__);
+
+    // main loop
+    while (is_running) {
+        // handle Ctrl + C
+        is_running = sdl_poll_events();
+
+        // delay
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        if (ask_prompt) {
+            fprintf(stdout, "\n");
+            fprintf(stdout, "%s: Say the following phrase: '%s%s%s'\n", __func__, "\033[1m", k_prompt.c_str(), "\033[0m");
+            fprintf(stdout, "\n");
+
+            ask_prompt = false;
+        }
+
+        {
+            audio.get(2000, pcmf32_cur);
+
+            if (::vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
+                fprintf(stdout, "%s: Speech detected! Processing ...\n", __func__);
+
+                int64_t t_ms = 0;
+
+                if (!have_prompt) {
+                    // wait for activation phrase
+                    audio.get(params.prompt_ms, pcmf32_cur);
+
+                    const auto txt = ::trim(::transcribe(ctx, params, pcmf32_cur, "prompt", logprob_min0, logprob_sum0, n_tokens0, t_ms));
+
+                    const float p = 100.0f * std::exp(logprob_min0);
+
+                    fprintf(stdout, "%s: Heard '%s%s%s', (t = %d ms, p = %.2f%%)\n", __func__, "\033[1m", txt.c_str(), "\033[0m", (int) t_ms, p);
+
+                    const float sim = similarity(txt, k_prompt);
+
+                    if (txt.length() < 0.8*k_prompt.length() || txt.length() > 1.2*k_prompt.length() || sim < 0.8f) {
+                        fprintf(stdout, "%s: WARNING: prompt not recognized, try again\n", __func__);
+                        ask_prompt = true;
+                    } else {
+                        fprintf(stdout, "\n");
+                        fprintf(stdout, "%s: The prompt has been recognized!\n", __func__);
+                        fprintf(stdout, "%s: Waiting for voice commands ...\n", __func__);
+                        fprintf(stdout, "\n");
+
+                        // save the audio for the prompt
+                        pcmf32_prompt = pcmf32_cur;
+                        have_prompt = true;
+                    }
                 } else {
-                    camera->SetMovementMode(earth_map::CameraController::MovementMode::FREE);
-                    std::cout << "→ Camera Mode: FREE (free-flying with WASD)\n";
-                }
-                break;
-            }
-            case GLFW_KEY_R:
-                camera->Reset();
-                std::cout << "→ Camera reset to default view\n";
-                break;
-            case GLFW_KEY_1: {
-                // Jump to Himalayan region (where SRTM data is)
-                // Coordinates: 27-29°N, 86-94°E (Mt. Everest region)
-                camera->SetGeographicPosition(90.0, 28.0, 500000.0);  // 500km altitude
-                camera->SetMovementMode(earth_map::CameraController::MovementMode::ORBIT);
-                std::cout << "→ Jumped to Himalayan region (SRTM data area)\n";
-                break;
-            }
-            case GLFW_KEY_O:
-                show_overlay = !show_overlay;
-                std::cout << "→ Debug overlay: " << (show_overlay ? "ON" : "OFF") << "\n";
-                break;
+                    // we have heard the activation phrase, now detect the commands
+                    audio.get(params.command_ms, pcmf32_cur);
 
-            case GLFW_KEY_M: {
-                bool enabled = g_earth_map_instance->IsMiniMapEnabled();
-                g_earth_map_instance->EnableMiniMap(!enabled);
-                std::cout << "→ Mini-map: " << (!enabled ? "ON" : "OFF") << "\n";
-                break;
-            }
-            case GLFW_KEY_H:
-                show_help = !show_help;
-                if (show_help) {
-                    print_help();
-                } else {
-                    std::cout << "→ Help hidden (press H to show again)\n";
-                }
-                break;
-            case GLFW_KEY_ESCAPE:
-                glfwSetWindowShouldClose(window, true);
-                break;
+                    //printf("len prompt:  %.4f\n", pcmf32_prompt.size() / (float) WHISPER_SAMPLE_RATE);
+                    //printf("len command: %.4f\n", pcmf32_cur.size() / (float) WHISPER_SAMPLE_RATE);
 
-            // Movement keys — forward to library via ProcessInput
-            // The camera's HandleKeyPress/HandleKeyRelease set internal movement
-            // impulses which UpdateMovement() applies with constraint enforcement.
-            case GLFW_KEY_W:
-            case GLFW_KEY_S:
-            case GLFW_KEY_A:
-            case GLFW_KEY_D:
-            case GLFW_KEY_Q:
-            case GLFW_KEY_E: {
-                earth_map::InputEvent event;
-                event.type = earth_map::InputEvent::Type::KEY_PRESS;
-                event.key = key;
-                camera->ProcessInput(event);
-                break;
+                    // prepend 3 second of silence
+                    pcmf32_cur.insert(pcmf32_cur.begin(), 3.0f*WHISPER_SAMPLE_RATE, 0.0f);
+
+                    // prepend the prompt audio
+                    pcmf32_cur.insert(pcmf32_cur.begin(), pcmf32_prompt.begin(), pcmf32_prompt.end());
+
+                    const auto txt = ::trim(::transcribe(ctx, params, pcmf32_cur, "root", logprob_min, logprob_sum, n_tokens, t_ms));
+
+                    //const float p = 100.0f * std::exp((logprob - logprob0) / (n_tokens - n_tokens0));
+                    const float p = 100.0f * std::exp(logprob_min);
+
+                    //fprintf(stdout, "%s: heard '%s'\n", __func__, txt.c_str());
+
+                    // find the prompt in the text
+                    float best_sim = 0.0f;
+                    size_t best_len = 0;
+                    for (size_t n = 0.8*k_prompt.size(); n <= 1.2*k_prompt.size(); ++n) {
+                        if (n >= txt.size()) {
+                            break;
+                        }
+
+                        const auto prompt = txt.substr(0, n);
+
+                        const float sim = similarity(prompt, k_prompt);
+
+                        //fprintf(stderr, "%s: prompt = '%s', sim = %f\n", __func__, prompt.c_str(), sim);
+
+                        if (sim > best_sim) {
+                            best_sim = sim;
+                            best_len = n;
+                        }
+                    }
+
+                    fprintf(stdout, "%s:   DEBUG: txt = '%s', prob = %.2f%%\n", __func__, txt.c_str(), p);
+                    if (best_len == 0) {
+                        fprintf(stdout, "%s: WARNING: command not recognized, try again\n", __func__);
+                    } else {
+                        // cut the prompt from the decoded text
+                        const std::string command = ::trim(txt.substr(best_len));
+                        fprintf(stdout, "%s: Command '%s%s%s', (t = %d ms)\n", __func__, "\033[1m", command.c_str(), "\033[0m", (int) t_ms);
+                        if (fout.is_open()) {
+                            fout << command << std::endl;
+                        }
+                    }
+
+                    fprintf(stdout, "\n");
+                }
+
+                audio.clear();
             }
         }
     }
 
-    // Handle key release events — forward WASD to library
-    if (action == GLFW_RELEASE) {
-        switch (key) {
-            case GLFW_KEY_W:
-            case GLFW_KEY_S:
-            case GLFW_KEY_A:
-            case GLFW_KEY_D:
-            case GLFW_KEY_Q:
-            case GLFW_KEY_E: {
-                earth_map::InputEvent event;
-                event.type = earth_map::InputEvent::Type::KEY_RELEASE;
-                event.key = key;
-                camera->ProcessInput(event);
-                break;
-            }
-        }
-    }
+    return 0;
 }
 
-// Mouse button callback
-void mouse_button_callback(GLFWwindow* window, int button, int action, int /*mods*/) {
-    if (g_earth_map_instance) {
-        auto camera = g_earth_map_instance->GetCameraController();
-        if (camera) {
-            // Detect double-click on left mouse button
-            if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
-                double current_time = glfwGetTime();
-                double time_since_last_click = current_time - last_click_time;
+int main(int argc, char ** argv) {
+    ggml_backend_load_all();
 
-                // Get mouse position
-                double mouse_x, mouse_y;
-                glfwGetCursorPos(window, &mouse_x, &mouse_y);
+    whisper_params params;
 
-                // Check for double-click
-                if (time_since_last_click < DOUBLE_CLICK_THRESHOLD) {
-                    // Double-click detected
-                    earth_map::InputEvent double_click_event;
-                    double_click_event.type = earth_map::InputEvent::Type::DOUBLE_CLICK;
-                    double_click_event.button = button;
-                    double_click_event.x = static_cast<float>(mouse_x);
-                    double_click_event.y = static_cast<float>(mouse_y);
-                    double_click_event.timestamp = current_time * 1000.0;
-
-                    camera->ProcessInput(double_click_event);
-
-                    std::cout << "→ Double-click detected: zooming to location\n";
-
-                    // Reset click time to prevent triple-click
-                    last_click_time = 0.0;
-                    return;  // Don't process as regular click
-                }
-
-                last_click_time = current_time;
-            }
-
-            // Convert click to geographic coordinates on left mouse press
-            if (action == GLFW_PRESS && button == GLFW_MOUSE_BUTTON_LEFT) {
-                // Use actual OpenGL viewport (handles retina/HiDPI correctly)
-                GLint gl_viewport[4];
-                glGetIntegerv(GL_VIEWPORT, gl_viewport);
-                glm::ivec4 viewport(gl_viewport[0], gl_viewport[1], gl_viewport[2], gl_viewport[3]);
-
-                // Get camera matrices
-                float aspect_ratio = static_cast<float>(gl_viewport[2]) / gl_viewport[3];
-                auto view_matrix = camera->GetViewMatrix();
-                auto proj_matrix = camera->GetProjectionMatrix(aspect_ratio);
-
-                // Get mouse position
-                double mouse_x, mouse_y;
-                glfwGetCursorPos(window, &mouse_x, &mouse_y);
-
-                // Scale mouse coordinates for retina/HiDPI displays
-                int window_width, window_height;
-                glfwGetWindowSize(window, &window_width, &window_height);
-                double scale_x = static_cast<double>(gl_viewport[2]) / window_width;
-                double scale_y = static_cast<double>(gl_viewport[3]) / window_height;
-
-                // Convert screen coordinates (flip Y for OpenGL: GLFW Y=0 at top, OpenGL Y=0 at bottom)
-                earth_map::coordinates::Screen screen_point(
-                    mouse_x * scale_x,
-                    (window_height - mouse_y) * scale_y
-                );
-                auto geo_coords = earth_map::coordinates::CoordinateMapper::ScreenToGeographic(
-                    screen_point, view_matrix, proj_matrix, viewport, 1.0f);
-
-                // Note we have a very huge distorsion in latitude (to poles)
-                if (geo_coords) {
-                    std::cout << "Clicked location: Lat " << std::fixed << std::setprecision(4)
-                              << geo_coords->latitude << "°, Lon " << geo_coords->longitude << "°" << std::endl;
-                } else {
-                    std::cout << "Click did not hit the globe" << std::endl;
-                }
-            }
-
-            // Create InputEvent and forward to camera
-            earth_map::InputEvent event;
-
-            if (action == GLFW_PRESS) {
-                event.type = earth_map::InputEvent::Type::MOUSE_BUTTON_PRESS;
-                glfwGetCursorPos(window, &last_mouse_x, &last_mouse_y);
-                mouse_dragging = true;
-            } else if (action == GLFW_RELEASE) {
-                event.type = earth_map::InputEvent::Type::MOUSE_BUTTON_RELEASE;
-                mouse_dragging = false;
-            }
-
-            event.button = button;
-            event.x = last_mouse_x;
-            event.y = last_mouse_y;
-            event.timestamp = glfwGetTime() * 1000.0;  // Convert to milliseconds
-
-            camera->ProcessInput(event);
-        }
+    if (whisper_params_parse(argc, argv, params) == false) {
+        return 1;
     }
-}
 
-// Mouse motion callback
-void cursor_position_callback(GLFWwindow* /*window*/, double xpos, double ypos) {
-    if (g_earth_map_instance) {
-        auto camera = g_earth_map_instance->GetCameraController();
-        if (camera) {
-            // Create InputEvent and forward to camera
-            earth_map::InputEvent event;
-            event.type = earth_map::InputEvent::Type::MOUSE_MOVE;
-            event.x = xpos;
-            event.y = ypos;
-            event.timestamp = glfwGetTime() * 1000.0;  // Convert to milliseconds
-
-            camera->ProcessInput(event);
-
-            last_mouse_x = xpos;
-            last_mouse_y = ypos;
-        }
+    if (whisper_lang_id(params.language.c_str()) == -1) {
+        fprintf(stderr, "error: unknown language '%s'\n", params.language.c_str());
+        whisper_print_usage(argc, argv, params);
+        exit(0);
     }
-}
 
-// Scroll callback for zoom
-void scroll_callback(GLFWwindow* /*window*/, double xoffset, double yoffset) {
-    if (g_earth_map_instance) {
-        auto camera = g_earth_map_instance->GetCameraController();
-        if (camera) {
-            // Create InputEvent and forward to camera
-            earth_map::InputEvent event;
-            event.type = earth_map::InputEvent::Type::MOUSE_SCROLL;
-            event.scroll_delta = static_cast<float>(yoffset);
-            event.timestamp = glfwGetTime() * 1000.0;  // Convert to milliseconds
+    // whisper init
 
-            camera->ProcessInput(event);
+    struct whisper_context_params cparams = whisper_context_default_params();
+
+    cparams.use_gpu    = params.use_gpu;
+    cparams.flash_attn = params.flash_attn;
+
+    struct whisper_context * ctx = whisper_init_from_file_with_params(params.model.c_str(), cparams);
+    if (ctx == nullptr) {
+        fprintf(stderr, "error: failed to initialize whisper context\n");
+        return 2;
+    }
+
+    // print some info about the processing
+    {
+        fprintf(stderr, "\n");
+        if (!whisper_is_multilingual(ctx)) {
+            if (params.language != "en" || params.translate) {
+                params.language = "en";
+                params.translate = false;
+                fprintf(stderr, "%s: WARNING: model is not multilingual, ignoring language and translation options\n", __func__);
+            }
+        }
+        fprintf(stderr, "%s: processing, %d threads, lang = %s, task = %s, timestamps = %d ...\n",
+                __func__,
+                params.n_threads,
+                params.language.c_str(),
+                params.translate ? "translate" : "transcribe",
+                params.no_timestamps ? 0 : 1);
+
+        fprintf(stderr, "\n");
+    }
+
+    // init audio
+
+    audio_async audio(30*1000);
+    if (!audio.init(params.capture_id, WHISPER_SAMPLE_RATE)) {
+        fprintf(stderr, "%s: audio.init() failed!\n", __func__);
+        return 1;
+    }
+
+    audio.resume();
+
+    // wait for 1 second to avoid any buffered noise
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    audio.clear();
+
+    int  ret_val = 0;
+
+    if (!params.grammar.empty()) {
+        auto & grammar = params.grammar_parsed;
+        if (is_file_exist(params.grammar.c_str())) {
+            // read grammar from file
+            std::ifstream ifs(params.grammar.c_str());
+            const std::string txt = std::string((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+            grammar = grammar_parser::parse(txt.c_str());
+        } else {
+            // read grammar from string
+            grammar = grammar_parser::parse(params.grammar.c_str());
+        }
+
+        // will be empty (default) if there are parse errors
+        if (grammar.rules.empty()) {
+            ret_val = 1;
+        } else {
+            fprintf(stderr, "%s: grammar:\n", __func__);
+            grammar_parser::print_grammar(stderr, grammar);
+            fprintf(stderr, "\n");
         }
     }
 
-    (void)xoffset;  // Suppress unused parameter warning
-}
-
-int main() {
-    try {
-        std::cout << "Earth Map Basic Example\n";
-        std::cout << "========================\n\n";
-        
-        // Display library info
-        std::cout << "Library Version: " << earth_map::LibraryInfo::GetVersion() << "\n";
-        std::cout << "Build Info: " << earth_map::LibraryInfo::GetBuildInfo() << "\n";
-
-        // spdlog::set_level(spdlog::level::debug);
-        
-        // Initialize GLFW
-        if (!glfwInit()) {
-            std::cerr << "Failed to initialize GLFW\n";
-            return -1;
+    std::ofstream fout;
+    if (params.fname_out.length() > 0) {
+        fout.open(params.fname_out);
+        if (!fout.is_open()) {
+            fprintf(stderr, "%s: failed to open output file '%s'!\n", __func__, params.fname_out.c_str());
+            return 1;
         }
-        
-        // Configure GLFW
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
-        glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
-        glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-        // glfwWindowHint(GLFW_VISIBLE, GLFW_FALSE); // Run in headless mode for debugging
-
-        // Create window
-        const int window_width = 1280;
-        const int window_height = 720;
-        GLFWwindow* window = glfwCreateWindow(window_width, window_height, "Earth Map - 3D Globe", NULL, NULL);
-        if (!window) {
-            std::cerr << "Failed to create GLFW window\n";
-            glfwTerminate();
-            return -1;
-        }
-        
-        // Make the window's context current
-        glfwMakeContextCurrent(window);
-        
-        // Set input callbacks
-        glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
-        glfwSetKeyCallback(window, key_callback);
-        glfwSetMouseButtonCallback(window, mouse_button_callback);
-        glfwSetCursorPosCallback(window, cursor_position_callback);
-        glfwSetScrollCallback(window, scroll_callback);
-        
-        // Initialize GLEW
-        if (glewInit() != GLEW_OK) {
-            std::cerr << "Failed to initialize GLEW\n";
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return -1;
-        }
-        
-        // Create Earth Map instance
-        std::cout << "Creating Earth Map instance...\n";
-        earth_map::Configuration config;
-        config.screen_width = window_width;
-        config.screen_height = window_height;
-        config.enable_performance_monitoring = true;
-
-        // Example usage of custom XYZ tile provider
-        auto googleProvider = std::make_shared<earth_map::BasicXYZTileProvider>(
-            "GoogleMaps",
-            "https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}&key=YOUR_API_KEY",
-            "0123",  // Subdomains for load balancing
-            0,       // Min zoom
-            21,      // Max zoom
-            "png"    // Format
-            );
-        config.tile_provider = googleProvider;
-
-        // Using SRTM data
-        config.elevation_config.enabled = true;
-        config.elevation_config.exaggeration_factor = 100.5f;  // Exaggerate for visibility
-        config.srtm_loader_config.local_directory = "./srtm_data";
-
-        auto earth_map_instance = earth_map::EarthMap::Create(config);
-        if (!earth_map_instance) {
-            std::cerr << "Failed to create Earth Map instance\n";
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return -1;
-        }
-        
-        std::cout << "Earth Map instance created successfully\n";
-        
-        // Set global instance for callbacks
-        g_earth_map_instance = earth_map_instance.get();
-        
-        // Initialize Earth Map with OpenGL context
-        if (!earth_map_instance->Initialize()) {
-            std::cerr << "Failed to initialize Earth Map\n";
-            glfwDestroyWindow(window);
-            glfwTerminate();
-            return -1;
-        }
-        
-        std::cout << "Earth Map initialized successfully\n";
-
-        // Debug: Check renderer state
-        auto renderer = earth_map_instance->GetRenderer();
-        if (renderer) {
-            auto stats = renderer->GetStats();
-            std::cout << "Renderer Stats:\n";
-            std::cout << "  Draw calls: " << stats.draw_calls << "\n";
-            std::cout << "  Triangles: " << stats.triangles_rendered << "\n";
-            std::cout << "  Vertices: " << stats.vertices_processed << "\n";
-        }
-
-        // Debug: Check OpenGL state
-        GLint viewport[4];
-        glGetIntegerv(GL_VIEWPORT, viewport);
-        std::cout << "OpenGL Viewport: " << viewport[0] << ", " << viewport[1] << ", "
-                  << viewport[2] << ", " << viewport[3] << "\n";
-
-        GLboolean depth_test = glIsEnabled(GL_DEPTH_TEST);
-        GLboolean cull_face = glIsEnabled(GL_CULL_FACE);
-        std::cout << "Depth Test: " << (depth_test ? "ENABLED" : "DISABLED") << "\n";
-        std::cout << "Cull Face: " << (cull_face ? "ENABLED" : "DISABLED") << "\n";
-
-        // Check system requirements now that OpenGL context is fully initialized
-        std::cout << "System Requirements: "
-                  << (earth_map::LibraryInfo::CheckSystemRequirements() ? "Met" : "Not Met")
-                  << "\n\n";
-
-        // Display help
-        print_help();
-
-        // Display initial camera state
-        auto camera = earth_map_instance->GetCameraController();
-        if (camera) {
-            auto pos = camera->GetPosition();
-            auto orient = camera->GetOrientation();
-            auto target = camera->GetTarget();
-            auto mode = camera->GetMovementMode();
-            float fov = camera->GetFieldOfView();
-
-            std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
-            std::cout << "║          INITIAL CAMERA STATE                              ║\n";
-            std::cout << "╠════════════════════════════════════════════════════════════╣\n";
-            std::cout << "║ Position:  (" << pos.x << ", " << pos.y << ", " << pos.z << ")\n";
-            std::cout << "║ Target:    (" << target.x << ", " << target.y << ", " << target.z << ")\n";
-            std::cout << "║ Distance from origin: " << glm::length(pos) / 1000.0 << " km\n";
-            std::cout << "║ Heading:   " << orient.x << "°\n";
-            std::cout << "║ Pitch:     " << orient.y << "°\n";
-            std::cout << "║ Roll:      " << orient.z << "°\n";
-            std::cout << "║ FOV:       " << fov << "°\n";
-            std::cout << "║ Mode:      " << (mode == earth_map::CameraController::MovementMode::FREE ? "FREE" : "ORBIT") << "\n";
-
-            // Calculate view direction
-            glm::vec3 view_dir = glm::normalize(target - pos);
-            std::cout << "║ View direction: (" << view_dir.x << ", " << view_dir.y << ", " << view_dir.z << ")\n";
-
-            // Check if globe should be visible
-            float globe_radius = static_cast<float>(earth_map::constants::geodetic::EARTH_SEMI_MAJOR_AXIS);  // meters
-            float distance_to_origin = glm::length(pos);
-            float nearest_globe_point = distance_to_origin - globe_radius;
-            float farthest_globe_point = distance_to_origin + globe_radius;
-
-            std::cout << "║\n";
-            std::cout << "║ Globe radius: " << globe_radius / 1000.0 << " km\n";
-            std::cout << "║ Nearest globe point: " << nearest_globe_point / 1000.0 << " km from camera\n";
-            std::cout << "║ Farthest globe point: " << farthest_globe_point / 1000.0 << " km from camera\n";
-            std::cout << "╚════════════════════════════════════════════════════════════╝\n\n";
-        }
-
-        // Main render loop
-        std::cout << "Starting render loop...\n\n";
-
-        auto last_time = std::chrono::high_resolution_clock::now();
-        int frame_count = 0;
-        auto last_overlay_time = last_time;
-
-        while (!glfwWindowShouldClose(window)) {
-            // Calculate delta time
-            auto current_time = std::chrono::high_resolution_clock::now();
-            float delta_time = std::chrono::duration<float>(current_time - last_time).count();
-            // const float max_delta_time = 0.1f;  // Cap the delta_time to avoid extreme movement
-            // delta_time = glm::min(delta_time, max_delta_time);
-            last_time = current_time;
-
-            // Update camera — all movement is handled internally by the library
-            // via ProcessInput() key events and UpdateMovement() with constraint
-            // enforcement. No manual position manipulation needed.
-            auto camera = earth_map_instance->GetCameraController();
-            if (camera) {
-                camera->Update(delta_time);
-            }
-
-            // Render
-            earth_map_instance->Render();
-
-            // Swap buffers and poll events
-            glfwSwapBuffers(window);
-            glfwPollEvents();
-
-            // Update frame counter
-            frame_count++;
-
-            // Print debug overlay every 1 second
-            auto elapsed = std::chrono::duration<float>(current_time - last_overlay_time).count();
-            if (show_overlay && elapsed >= 1.0f) {
-                if (camera) {
-                    auto pos = camera->GetPosition();
-                    auto orient = camera->GetOrientation();
-                    auto target = camera->GetTarget();
-                    auto mode = camera->GetMovementMode();
-                    float fps = frame_count / elapsed;
-
-                    float distance_from_origin = glm::length(pos);
-                    float globe_radius = static_cast<float>(earth_map::constants::geodetic::EARTH_SEMI_MAJOR_AXIS);
-                    float distance_from_surface = distance_from_origin - globe_radius;
-
-                    // Calculate view direction
-                    glm::vec3 view_dir = glm::normalize(target - pos);
-
-                    // Clear a few lines and print overlay
-                    std::cout << "\r\033[K";  // Clear line
-                    std::cout << "╔═══════════════════════════════════ DEBUG OVERLAY ═══════════════════════════════════╗\n";
-                    std::cout << "║ FPS: " << static_cast<int>(fps) << " fps                                                                         ║\n";
-                    std::cout << "║ Camera Position: ("
-                              << static_cast<int>(pos.x/1000) << ", "
-                              << static_cast<int>(pos.y/1000) << ", "
-                              << static_cast<int>(pos.z/1000) << ") km                    ║\n";
-                    std::cout << "║ Globe Center: (0, 0, 0) km                                                         ║\n";
-                    std::cout << "║ Distance from origin: " << static_cast<int>(distance_from_origin/1000) << " km                                             ║\n";
-                    std::cout << "║ Distance from surface: " << static_cast<int>(distance_from_surface/1000) << " km                                            ║\n";
-                    std::cout << "║ View Direction: ("
-                              << std::fixed << std::setprecision(2) << view_dir.x << ", "
-                              << view_dir.y << ", " << view_dir.z << ")                                     ║\n";
-                    std::cout << "║ Heading: " << static_cast<int>(orient.x) << "°  |  Pitch: " << static_cast<int>(orient.y) << "°  |  Roll: " << static_cast<int>(orient.z) << "°                                   ║\n";
-                    std::cout << "║ Mode: " << (mode == earth_map::CameraController::MovementMode::FREE ? "FREE (WASD enabled)" : "ORBIT (WASD disabled)") << "                                                    ║\n";
-                    std::cout << "╚═══════════════════════════════════════════════════════════════════════════════════╝\n";
-                    std::cout << std::flush;
-                }
-                frame_count = 0;
-                last_overlay_time = current_time;
-            }
-        }
-        
-        std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
-        std::cout << "║  Application shutting down...                              ║\n";
-        std::cout << "╚════════════════════════════════════════════════════════════╝\n";
-
-        // Cleanup
-        earth_map_instance.reset();
-        glfwDestroyWindow(window);
-        glfwTerminate();
-
-        std::cout << "\nExample completed successfully!\n";
-        return 0;
-        
-    } catch (const std::exception& e) {
-        std::cerr << "Exception: " << e.what() << "\n";
-        return -1;
-    } catch (...) {
-        std::cerr << "Unknown exception occurred\n";
-        return -1;
     }
+
+    if (ret_val == 0) {
+        if (!params.commands.empty()) {
+            ret_val = process_command_list(ctx, audio, params, fout);
+        } else if (!params.prompt.empty() && params.grammar_parsed.rules.empty()) {
+            ret_val = always_prompt_transcription(ctx, audio, params, fout);
+        } else {
+            ret_val = process_general_transcription(ctx, audio, params, fout);
+        }
+    }
+
+    audio.pause();
+
+    whisper_print_timings(ctx);
+    whisper_free(ctx);
+
+    return ret_val;
 }

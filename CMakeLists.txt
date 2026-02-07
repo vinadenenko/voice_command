@@ -12,7 +12,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 # Build options
 #option(VOICE_COMMAND_BUILD_TESTS "Build unit tests" ON)
-#option(VOICE_COMMAND_BUILD_EXAMPLES "Build example applications" ON)
+option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" ON)
 #option(VOICE_COMMAND_BUILD_DOCS "Generate documentation" OFF)
 #option(VOICE_COMMAND_INSTALL "Generate install target" ON)
 
@@ -160,9 +160,9 @@ target_compile_definitions(voice_command
 # endif()
 
 # Examples
-#if(VOICE_COMMAND_BUILD_EXAMPLES)
-#    add_subdirectory(examples)
-#endif()
+if(VOICE_COMMAND_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
 
 # # Documentation
 # if(VOICE_COMMAND_BUILD_DOCS)
