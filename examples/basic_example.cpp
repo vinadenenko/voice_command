@@ -28,6 +28,10 @@
 // Voice Command Library Integration
 // ============================================================================
 
+// Set to true to use NLU-based parameterized command processing
+// Set to false to use original guided mode (commands.txt)
+static const bool k_use_parameterized_mode = true;
+
 // Simple command implementation for demonstration
 class CreatePlacemarkCommand : public voice_command::ICommand {
 public:
@@ -643,6 +647,133 @@ static int process_file_input(struct whisper_context * /*ctx*/, const whisper_pa
     return 0;
 }
 
+// Parameterized command mode with NLU
+// Uses general whisper transcription + NLU for parameter extraction
+static int process_command_parametrized_test(struct whisper_context * ctx, audio_async &audio,
+                                              const whisper_params &params, std::ofstream &fout,
+                                              voice_command::CommandDispatcher* dispatcher,
+                                              voice_command::CommandRegistry* registry,
+                                              voice_command::INluEngine* nlu) {
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: parameterized command mode with NLU\n", __func__);
+
+    // Get all command descriptors for NLU
+    auto descriptors = registry->GetAllDescriptors();
+
+    fprintf(stderr, "%s: registered commands:\n", __func__);
+    for (const auto* desc : descriptors) {
+        fprintf(stderr, "  - \033[1m%s\033[0m", desc->name.c_str());
+        if (desc->IsParameterized()) {
+            fprintf(stderr, " (params: ");
+            for (size_t i = 0; i < desc->parameters.size(); ++i) {
+                if (i > 0) fprintf(stderr, ", ");
+                fprintf(stderr, "%s", desc->parameters[i].name.c_str());
+            }
+            fprintf(stderr, ")");
+        }
+        fprintf(stderr, "\n");
+    }
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: listening for commands ...\n", __func__);
+    fprintf(stderr, "\n");
+
+    bool is_running = true;
+    std::vector<float> pcmf32_cur;
+
+    float logprob_min = 0.0f;
+    float logprob_sum = 0.0f;
+    int n_tokens = 0;
+
+    // main loop
+    while (is_running) {
+        // handle Ctrl + C
+        is_running = sdl_poll_events();
+
+        // delay
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+        audio.get(2000, pcmf32_cur);
+
+        if (::vad_simple(pcmf32_cur, WHISPER_SAMPLE_RATE, 1000, params.vad_thold, params.freq_thold, params.print_energy)) {
+            fprintf(stdout, "%s: Speech detected! Processing ...\n", __func__);
+
+            const auto t_start = std::chrono::high_resolution_clock::now();
+
+            // Get more audio for the command
+            audio.get(params.command_ms, pcmf32_cur);
+
+            // General whisper transcription
+            int64_t t_ms = 0;
+            std::string transcript = ::trim(::transcribe(ctx, params, pcmf32_cur, "", logprob_min, logprob_sum, n_tokens, t_ms));
+
+            if (transcript.empty()) {
+                fprintf(stdout, "%s: No transcription result\n", __func__);
+                audio.clear();
+                continue;
+            }
+
+            fprintf(stdout, "\n");
+            fprintf(stdout, "%s: Transcript: '%s%s%s' (t = %lld ms)\n", __func__,
+                    "\033[1m", transcript.c_str(), "\033[0m", (long long)t_ms);
+
+            // Use NLU to process the transcript
+            auto nlu_result = nlu->Process(transcript, descriptors);
+
+            const auto t_end = std::chrono::high_resolution_clock::now();
+            int total_ms = (int) std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count();
+
+            if (!nlu_result.success) {
+                fprintf(stdout, "%s: NLU failed: %s\n", __func__, nlu_result.error_message.c_str());
+                audio.clear();
+                continue;
+            }
+
+            fprintf(stdout, "%s: NLU result: command='%s%s%s' confidence=%.2f%%\n", __func__,
+                    "\033[1m", nlu_result.command_name.c_str(), "\033[0m",
+                    nlu_result.confidence * 100.0f);
+
+            // Print extracted parameters
+            if (!nlu_result.extracted_params.empty()) {
+                fprintf(stdout, "%s: Extracted parameters:\n", __func__);
+                for (const auto& [key, value] : nlu_result.extracted_params) {
+                    fprintf(stdout, "%s:   %s = '%s'\n", __func__, key.c_str(), value.c_str());
+                }
+            }
+
+            if (fout.is_open()) {
+                fout << nlu_result.command_name << std::endl;
+            }
+
+            // Build CommandContext with extracted params
+            voice_command::CommandContext context;
+            context.SetRawTranscript(transcript);
+            context.SetConfidence(nlu_result.confidence);
+            for (const auto& [key, value] : nlu_result.extracted_params) {
+                context.SetParam(key, voice_command::ParamValue(value));
+            }
+
+            // Dispatch command
+            voice_command::CommandResult result = dispatcher->Dispatch(nlu_result.command_name, context);
+
+            fprintf(stdout, "%s: total processing time = %d ms\n", __func__, total_ms);
+
+            if (result == voice_command::CommandResult::kSuccess) {
+                fprintf(stdout, "%s: Command executed successfully\n", __func__);
+            } else if (result == voice_command::CommandResult::kFailure) {
+                fprintf(stdout, "%s: Command not found\n", __func__);
+            } else if (result == voice_command::CommandResult::kInvalidParams) {
+                fprintf(stdout, "%s: Invalid parameters\n", __func__);
+            }
+
+            fprintf(stdout, "\n");
+            audio.clear();
+        }
+    }
+
+    return 0;
+}
+
 // always-prompt mode
 // transcribe the voice into text after valid prompt
 static int always_prompt_transcription(struct whisper_context * ctx, audio_async & audio, const whisper_params & params, std::ofstream & fout) {
@@ -1014,7 +1145,11 @@ int main(int argc, char ** argv) {
         if (!params.input_file.empty()) {
             // File input mode - process pre-transcribed commands from file with NLU
             ret_val = process_file_input(ctx, params, fout, &dispatcher, &registry, &nlu);
+        } else if (k_use_parameterized_mode) {
+            // Parameterized command mode with NLU (audio input)
+            ret_val = process_command_parametrized_test(ctx, audio, params, fout, &dispatcher, &registry, &nlu);
         } else if (!params.commands.empty()) {
+            // Original guided mode (requires commands.txt)
             ret_val = process_command_list(ctx, audio, params, fout, &dispatcher);
         } else if (!params.prompt.empty() && params.grammar_parsed.rules.empty()) {
             ret_val = always_prompt_transcription(ctx, audio, params, fout);
