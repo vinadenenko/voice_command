@@ -7,6 +7,12 @@
 #include "whisper.h"
 #include "grammar-parser.h"
 
+#include "command/registry/commandregistry.h"
+#include "command/dispatcher/commanddispatcher.h"
+#include "command/icommand.h"
+#include "command/context/commandcontext.h"
+#include "command/command_result.h"
+
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -16,6 +22,29 @@
 #include <string>
 #include <thread>
 #include <vector>
+
+// ============================================================================
+// Voice Command Library Integration
+// ============================================================================
+
+// Simple command implementation for demonstration
+class CreatePlacemarkCommand : public voice_command::ICommand {
+public:
+    voice_command::CommandResult Execute(const voice_command::CommandContext& context) override {
+        fprintf(stdout, "\n");
+        fprintf(stdout, "========================================\n");
+        fprintf(stdout, "Creating placemark...\n");
+        fprintf(stdout, "========================================\n");
+        fprintf(stdout, "\n");
+        return voice_command::CommandResult::kSuccess;
+    }
+    
+    std::string GetName() const override { return "create placemark"; }
+};
+
+// ============================================================================
+// Original whisper example code
+// ============================================================================
 
 // command-line parameters
 struct whisper_params {
@@ -252,7 +281,8 @@ static std::vector<std::string> get_words(const std::string &txt) {
 
 // command-list mode
 // guide the transcription to match the most likely command from a provided list
-static int process_command_list(struct whisper_context * ctx, audio_async &audio, const whisper_params &params, std::ofstream &fout) {
+static int process_command_list(struct whisper_context * ctx, audio_async &audio, const whisper_params &params, std::ofstream &fout,
+                                voice_command::CommandDispatcher* dispatcher) {
     fprintf(stderr, "\n");
     fprintf(stderr, "%s: guided mode\n", __func__);
 
@@ -455,6 +485,20 @@ static int process_command_list(struct whisper_context * ctx, audio_async &audio
                     if (fout.is_open()) {
                         fout << best_command << std::endl;
                     }
+                    
+                    // Dispatch command through voice_command library
+                    if (dispatcher) {
+                        voice_command::CommandContext context;
+                        voice_command::CommandResult result = dispatcher->Dispatch(best_command, context);
+                        
+                        if (result == voice_command::CommandResult::kSuccess) {
+                            fprintf(stdout, "%s: Command dispatched successfully\n", __func__);
+                        } else if (result == voice_command::CommandResult::kFailure) {
+                            fprintf(stdout, "%s: Command dispatch failed\n", __func__);
+                        } else if (result == voice_command::CommandResult::kInvalidParams) {
+                            fprintf(stdout, "%s: Command has invalid parameters\n", __func__);
+                        }
+                    }
                 }
             }
 
@@ -468,7 +512,8 @@ static int process_command_list(struct whisper_context * ctx, audio_async &audio
 // file input mode for guided mode
 // process pre-transcribed commands from a text file (one per line)
 // each line is treated as transcribed text and matched against allowed commands
-static int process_file_input(struct whisper_context * /*ctx*/, const whisper_params &params, std::ofstream &fout) {
+static int process_file_input(struct whisper_context * /*ctx*/, const whisper_params &params, std::ofstream &fout,
+                              voice_command::CommandDispatcher* dispatcher) {
     fprintf(stderr, "\n");
     fprintf(stderr, "%s: file input mode\n", __func__);
 
@@ -554,6 +599,20 @@ static int process_file_input(struct whisper_context * /*ctx*/, const whisper_pa
             fprintf(stdout, "\n");
             if (fout.is_open()) {
                 fout << best_command << std::endl;
+            }
+            
+            // Dispatch command through voice_command library
+            if (dispatcher) {
+                voice_command::CommandContext context;
+                voice_command::CommandResult result = dispatcher->Dispatch(best_command, context);
+                
+                if (result == voice_command::CommandResult::kSuccess) {
+                    fprintf(stdout, "%s: Command dispatched successfully\n", __func__);
+                } else if (result == voice_command::CommandResult::kFailure) {
+                    fprintf(stdout, "%s: Command dispatch failed\n", __func__);
+                } else if (result == voice_command::CommandResult::kInvalidParams) {
+                    fprintf(stdout, "%s: Command has invalid parameters\n", __func__);
+                }
             }
         }
     }
@@ -883,6 +942,20 @@ int main(int argc, char ** argv) {
         }
     }
 
+    // Initialize voice_command library components
+    voice_command::CommandRegistry registry;
+    voice_command::CommandDispatcher dispatcher(&registry);
+    
+    // Register the CreatePlacemark command
+    voice_command::CommandDescriptor placemark_desc;
+    placemark_desc.name = "create placemark";
+    placemark_desc.description = "Creates a placemark";
+    if (registry.Register(placemark_desc, std::make_unique<CreatePlacemarkCommand>())) {
+        fprintf(stderr, "%s: Registered command: %s\n", __func__, placemark_desc.name.c_str());
+    } else {
+        fprintf(stderr, "%s: Failed to register command: %s\n", __func__, placemark_desc.name.c_str());
+    }
+
     if (ret_val == 0) {
         if (!params.input_file.empty()) {
             // File input mode - process pre-transcribed commands from file
@@ -890,10 +963,10 @@ int main(int argc, char ** argv) {
                 fprintf(stderr, "error: --input-file requires --commands to be specified\n");
                 ret_val = 1;
             } else {
-                ret_val = process_file_input(ctx, params, fout);
+                ret_val = process_file_input(ctx, params, fout, &dispatcher);
             }
         } else if (!params.commands.empty()) {
-            ret_val = process_command_list(ctx, audio, params, fout);
+            ret_val = process_command_list(ctx, audio, params, fout, &dispatcher);
         } else if (!params.prompt.empty() && params.grammar_parsed.rules.empty()) {
             ret_val = always_prompt_transcription(ctx, audio, params, fout);
         } else {

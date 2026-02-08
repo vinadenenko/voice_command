@@ -1,2 +1,2 @@
 enable
-red
+create placemark
