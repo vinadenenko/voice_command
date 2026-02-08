@@ -67,6 +67,8 @@ set(VOICE_COMMAND_SOURCES
     src/command/context/commandcontext.cpp
     src/command/descriptor/commanddescriptor.cpp
     src/command/registry/commandregistry.cpp
+    src/command/nlu/llm_nlu_engine.cpp
+    src/command/nlu/rule_based_nlu_engine.cpp
 )
 
 set(VOICE_COMMAND_HEADERS
@@ -76,6 +78,9 @@ set(VOICE_COMMAND_HEADERS
     include/command/context/commandcontext.h
     include/command/descriptor/commanddescriptor.h
     include/command/registry/commandregistry.h
+    include/command/nlu/inlu_engine.h
+    include/command/nlu/llm_nlu_engine.h
+    include/command/nlu/rule_based_nlu_engine.h
 )
 
 # Create the main library
