@@ -47,6 +47,7 @@ struct whisper_params {
     std::string prompt;
     std::string context;
     std::string grammar;
+    std::string input_file;
 
     // A regular expression that matches tokens to suppress
     std::string suppress_regex;
@@ -85,6 +86,7 @@ static bool whisper_params_parse(int argc, char ** argv, whisper_params & params
         else if (                   arg == "--grammar")       { params.grammar       = argv[++i]; }
         else if (                   arg == "--grammar-penalty") { params.grammar_penalty = std::stof(argv[++i]); }
         else if (                   arg == "--suppress-regex") { params.suppress_regex = argv[++i]; }
+        else if (arg == "-if"      || arg == "--input-file")   { params.input_file    = argv[++i]; }
         else {
             fprintf(stderr, "error: unknown argument: %s\n", arg.c_str());
             whisper_print_usage(argc, argv, params);
@@ -124,6 +126,7 @@ void whisper_print_usage(int /*argc*/, char ** argv, const whisper_params & para
     fprintf(stderr, "  --grammar GRAMMAR            [%-7s] GBNF grammar to guide decoding\n",              params.grammar.c_str());
     fprintf(stderr, "  --grammar-penalty N          [%-7.1f] scales down logits of nongrammar tokens\n",   params.grammar_penalty);
     fprintf(stderr, "  --suppress-regex REGEX       [%-7s] regular expression matching tokens to suppress\n", params.suppress_regex.c_str());
+    fprintf(stderr, "  -if FNAME,  --input-file     [%-7s] text file with pre-transcribed commands (one per line)\n", params.input_file.c_str());
     fprintf(stderr, "\n");
 }
 
@@ -462,6 +465,104 @@ static int process_command_list(struct whisper_context * ctx, audio_async &audio
     return 0;
 }
 
+// file input mode for guided mode
+// process pre-transcribed commands from a text file (one per line)
+// each line is treated as transcribed text and matched against allowed commands
+static int process_file_input(struct whisper_context * /*ctx*/, const whisper_params &params, std::ofstream &fout) {
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: file input mode\n", __func__);
+
+    std::vector<std::string> allowed_commands = read_allowed_commands(params.commands);
+
+    if (allowed_commands.empty()) {
+        fprintf(stderr, "%s: error: failed to read allowed commands from '%s'\n", __func__, params.commands.c_str());
+        return 2;
+    }
+
+    std::ifstream input_ifs(params.input_file);
+    if (!input_ifs.is_open()) {
+        fprintf(stderr, "%s: error: failed to open input file '%s'\n", __func__, params.input_file.c_str());
+        return 3;
+    }
+
+    int max_len = 0;
+    for (const auto & cmd : allowed_commands) {
+        max_len = std::max(max_len, (int) cmd.size());
+    }
+
+    fprintf(stderr, "%s: allowed commands:\n", __func__);
+    fprintf(stderr, "\n");
+    for (int i = 0; i < (int) allowed_commands.size(); ++i) {
+        fprintf(stderr, "  - \033[1m%-*s\033[0m\n", max_len, allowed_commands[i].c_str());
+    }
+
+    fprintf(stderr, "\n");
+    fprintf(stderr, "%s: processing commands from file '%s' ...\n", __func__, params.input_file.c_str());
+    fprintf(stderr, "\n");
+
+    std::string line;
+    int line_num = 0;
+    while (std::getline(input_ifs, line)) {
+        line_num++;
+        line = ::trim(line);
+        if (line.empty()) {
+            continue;
+        }
+
+        const auto t_start = std::chrono::high_resolution_clock::now();
+
+        // Convert input to lowercase for comparison
+        std::string line_lower = line;
+        std::transform(line_lower.begin(), line_lower.end(), line_lower.begin(), ::tolower);
+
+        // Calculate similarity with each allowed command
+        std::vector<std::pair<float, int>> sim_id;
+        for (int i = 0; i < (int) allowed_commands.size(); ++i) {
+            float sim = similarity(line_lower, allowed_commands[i]);
+            sim_id.emplace_back(sim, i);
+        }
+
+        // sort descending by similarity
+        {
+            using pair_type = decltype(sim_id)::value_type;
+            std::sort(sim_id.begin(), sim_id.end(), [](const pair_type & a, const pair_type & b) {
+                return a.first > b.first;
+            });
+        }
+
+        // print all commands with their similarity scores
+        {
+            fprintf(stdout, "\n");
+            fprintf(stdout, "%s: Input: '%s%s%s'\n", __func__, "\033[1m", line.c_str(), "\033[0m");
+            fprintf(stdout, "%s: Command similarities:\n", __func__);
+            for (const auto & cmd : sim_id) {
+                fprintf(stdout, "%s:   %s%-*s%s = %.2f%%\n", __func__, "\033[1m", max_len, allowed_commands[cmd.second].c_str(), "\033[0m", cmd.first * 100.0f);
+            }
+        }
+
+        // best command
+        {
+            const auto t_end = std::chrono::high_resolution_clock::now();
+            const float sim = sim_id[0].first;
+            const int index = sim_id[0].second;
+            const char * best_command = allowed_commands[index].c_str();
+
+            fprintf(stdout, "\n");
+            fprintf(stdout, "%s: detected command: %s%s%s | similarity = %.2f%% | t = %d ms\n", __func__,
+                    "\033[1m", best_command, "\033[0m", sim * 100.0f,
+                    (int) std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count());
+            fprintf(stdout, "\n");
+            if (fout.is_open()) {
+                fout << best_command << std::endl;
+            }
+        }
+    }
+
+    fprintf(stderr, "%s: Finished processing %d lines from file.\n", __func__, line_num);
+
+    return 0;
+}
+
 // always-prompt mode
 // transcribe the voice into text after valid prompt
 static int always_prompt_transcription(struct whisper_context * ctx, audio_async & audio, const whisper_params & params, std::ofstream & fout) {
@@ -732,21 +833,24 @@ int main(int argc, char ** argv) {
         fprintf(stderr, "\n");
     }
 
-    // init audio
-
-    audio_async audio(30*1000);
-    if (!audio.init(params.capture_id, WHISPER_SAMPLE_RATE)) {
-        fprintf(stderr, "%s: audio.init() failed!\n", __func__);
-        return 1;
-    }
-
-    audio.resume();
-
-    // wait for 1 second to avoid any buffered noise
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-    audio.clear();
-
     int  ret_val = 0;
+
+    // init audio (skip if using file input mode)
+    audio_async audio(30*1000);
+    bool use_audio = params.input_file.empty();
+
+    if (use_audio) {
+        if (!audio.init(params.capture_id, WHISPER_SAMPLE_RATE)) {
+            fprintf(stderr, "%s: audio.init() failed!\n", __func__);
+            return 1;
+        }
+
+        audio.resume();
+
+        // wait for 1 second to avoid any buffered noise
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        audio.clear();
+    }
 
     if (!params.grammar.empty()) {
         auto & grammar = params.grammar_parsed;
@@ -780,7 +884,15 @@ int main(int argc, char ** argv) {
     }
 
     if (ret_val == 0) {
-        if (!params.commands.empty()) {
+        if (!params.input_file.empty()) {
+            // File input mode - process pre-transcribed commands from file
+            if (params.commands.empty()) {
+                fprintf(stderr, "error: --input-file requires --commands to be specified\n");
+                ret_val = 1;
+            } else {
+                ret_val = process_file_input(ctx, params, fout);
+            }
+        } else if (!params.commands.empty()) {
             ret_val = process_command_list(ctx, audio, params, fout);
         } else if (!params.prompt.empty() && params.grammar_parsed.rules.empty()) {
             ret_val = always_prompt_transcription(ctx, audio, params, fout);
@@ -789,7 +901,9 @@ int main(int argc, char ** argv) {
         }
     }
 
-    audio.pause();
+    if (use_audio) {
+        audio.pause();
+    }
 
     whisper_print_timings(ctx);
     whisper_free(ctx);
