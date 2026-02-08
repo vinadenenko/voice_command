@@ -20,6 +20,8 @@ New function process_command_parametrized_test:
   To test with file input (simulated whisper output):
   ./build/Debug/examples/basic_example -m models/ggml-base.en.bin -if examples/test_input.txt
   
+    Currently running with params: -cmd /home/user/projects/voice_command/examples/commands.txt --input-file /home/user/projects/voice_command/examples/input_commands.txt
+  
 After the transcript is obtained:                                                                                                       
                                                                                                                                                         
   1. process_file_input: reads transcript from file → NLU → dispatch                                                                                    
