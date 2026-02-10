@@ -70,3 +70,21 @@ target_link_libraries(basic_example
 
 # Add to examples group
 set_target_properties(basic_example PROPERTIES FOLDER "Examples")
+
+# Integration Example - uses voice_command library as a black box (Qt-based)
+find_package(Qt6 REQUIRED COMPONENTS Core)
+
+add_executable(integration_example
+    integration_example.cpp
+)
+
+target_link_libraries(integration_example
+    PRIVATE
+        voice_command
+        Qt6::Core
+)
+
+set_target_properties(integration_example PROPERTIES
+    FOLDER "Examples"
+    AUTOMOC ON
+)

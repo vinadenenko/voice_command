@@ -1,14 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-project(VoiceCommand
-    VERSION 0.1.0
-    DESCRIPTION "no desc"
-    LANGUAGES CXX
-)
 
 # C++ standard and project options
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+project(VoiceCommand
+    VERSION 0.1.0
+    DESCRIPTION "no desc"
+    LANGUAGES CXX
+)
 
 # Build options
 #option(VOICE_COMMAND_BUILD_TESTS "Build unit tests" ON)
@@ -46,7 +47,7 @@ option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" ON)
 #         add_compile_definitions(VOICE_COMMAND_OPENGL_DEBUG)
 #     endif()
 # endif()
-
+find_package(Qt6 REQUIRED COMPONENTS Core)
 # Find required packages
 find_package(whisper-cpp REQUIRED)
 # find_package(nlohmann_json REQUIRED)
@@ -61,17 +62,31 @@ endif()
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Audio capture library (must be before voice_command since it depends on it)
+add_subdirectory(src/audio_capture)
+
 # Source files
 set(VOICE_COMMAND_SOURCES
+    # Command framework
     src/command/dispatcher/commanddispatcher.cpp
     src/command/context/commandcontext.cpp
     src/command/descriptor/commanddescriptor.cpp
     src/command/registry/commandregistry.cpp
     src/command/nlu/llm_nlu_engine.cpp
     src/command/nlu/rule_based_nlu_engine.cpp
+    # Engine wrappers
+    src/audio_engine.cpp
+    src/whisper_engine.cpp
+    # Recognition strategies
+    src/guided_recognition_strategy.cpp
+    src/nlu_recognition_strategy.cpp
+    # Orchestration
+    src/voice_assistant.cpp
+    src/qt_voice_assistant.cpp
 )
 
 set(VOICE_COMMAND_HEADERS
+    # Command framework
     include/command/command_result.h
     include/command/icommand.h
     include/command/dispatcher/commanddispatcher.h
@@ -81,6 +96,14 @@ set(VOICE_COMMAND_HEADERS
     include/command/nlu/inlu_engine.h
     include/command/nlu/llm_nlu_engine.h
     include/command/nlu/rule_based_nlu_engine.h
+    # Engine wrappers
+    include/audio_engine.h
+    include/whisper_engine.h
+    # Recognition strategies
+    include/recognition_strategy.h
+    # Orchestration
+    include/voice_assistant.h
+    include/qt_voice_assistant.h
 )
 
 # Create the main library
@@ -101,10 +124,14 @@ set_target_properties(voice_command PROPERTIES
 target_link_libraries(voice_command
     PUBLIC
         whisper-cpp::whisper-cpp
+        audio_capture
+        Qt6::Core
         # nlohmann_json::nlohmann_json
         # spdlog::spdlog
 )
-
+set_target_properties(voice_command PROPERTIES
+    AUTOMOC ON
+)
 # Include directories for the library
 target_include_directories(voice_command
     PUBLIC
