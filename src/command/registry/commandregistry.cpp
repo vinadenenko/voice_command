@@ -26,6 +26,7 @@ bool CommandRegistry::RegisterSimple(const std::string& name,
     CommandDescriptor descriptor;
     descriptor.name = name;
     descriptor.description = "Simple command: " + name;
+    descriptor.trigger_phrases = triggers;
 
     return Register(descriptor, std::move(command));
 }
@@ -91,15 +92,26 @@ std::vector<const CommandDescriptor*> CommandRegistry::GetAllDescriptors() const
 }
 
 bool CommandRegistry::HasParameterizedCommands() const {
-    // Currently all commands are treated as simple commands since
-    // ParamDescriptor and parameters field are commented out
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+
+    for (const auto& [name, entry] : commands_) {
+        if (entry.descriptor.IsParameterized()) {
+            return true;
+        }
+    }
     return false;
 }
 
 std::vector<std::string> CommandRegistry::GetAllTriggerPhrases() const {
-    // Currently returns empty since trigger_phrases field is commented out
-    // This is a placeholder for when the field is uncommented
-    return {};
+    std::shared_lock<std::shared_mutex> lock(mutex_);
+
+    std::vector<std::string> phrases;
+    for (const auto& [name, entry] : commands_) {
+        for (const auto& phrase : entry.descriptor.trigger_phrases) {
+            phrases.push_back(phrase);
+        }
+    }
+    return phrases;
 }
 
 }  // namespace voice_command

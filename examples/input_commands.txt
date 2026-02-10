@@ -1,2 +1,7 @@
 enable
 create placemark
+zoom to level 15
+create placemark
+zoom in to level 5
+zoom level 20
+add placemark
