@@ -1,0 +1,89 @@
+#include "recognition_strategy.h"
+
+#include <cmath>
+
+namespace voice_command {
+
+NluRecognitionStrategy::NluRecognitionStrategy(WhisperEngine* whisper_engine,
+                                               INluEngine* nlu_engine,
+                                               CommandRegistry* registry)
+    : whisper_engine_(whisper_engine),
+      nlu_engine_(nlu_engine),
+      registry_(registry) {}
+
+RecognitionResult NluRecognitionStrategy::Recognize(
+    const audio_capture::AudioSamples& samples) {
+    RecognitionResult result;
+
+    if (whisper_engine_ == nullptr || !whisper_engine_->IsInitialized()) {
+        result.error = "Whisper engine not initialized";
+        return result;
+    }
+
+    if (nlu_engine_ == nullptr) {
+        result.error = "NLU engine not available";
+        return result;
+    }
+
+    if (registry_ == nullptr) {
+        result.error = "Command registry not available";
+        return result;
+    }
+
+    // Step 1: Transcribe audio to text
+    auto transcription = whisper_engine_->Transcribe(samples);
+
+    if (!transcription.success) {
+        result.error = "Transcription failed: " + transcription.error;
+        return result;
+    }
+
+    if (transcription.text.empty()) {
+        result.error = "Empty transcription";
+        return result;
+    }
+
+    // Check transcription confidence (using exp of log probability)
+    float transcription_confidence = 0.0f;
+    if (transcription.num_tokens > 0) {
+        transcription_confidence =
+            std::exp(transcription.logprob_min);  // 0.0-1.0 range
+    }
+
+    if (transcription_confidence < min_transcription_confidence_) {
+        result.error = "Transcription confidence below threshold";
+        return result;
+    }
+
+    result.raw_transcript = transcription.text;
+
+    // Step 2: Process transcript with NLU
+    auto descriptors = registry_->GetAllDescriptors();
+    if (descriptors.empty()) {
+        result.error = "No commands registered";
+        return result;
+    }
+
+    auto nlu_result = nlu_engine_->Process(transcription.text, descriptors);
+
+    if (!nlu_result.success) {
+        result.error = "NLU processing failed: " + nlu_result.error_message;
+        return result;
+    }
+
+    // Check NLU confidence
+    if (nlu_result.confidence < min_nlu_confidence_) {
+        result.error = "NLU confidence below threshold";
+        return result;
+    }
+
+    // Step 3: Build result
+    result.success = true;
+    result.command_name = nlu_result.command_name;
+    result.confidence = nlu_result.confidence;
+    result.params = nlu_result.extracted_params;
+
+    return result;
+}
+
+}  // namespace voice_command

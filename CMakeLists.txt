@@ -62,17 +62,30 @@ endif()
 # Include directories
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+# Audio capture library (must be before voice_command since it depends on it)
+add_subdirectory(src/audio_capture)
+
 # Source files
 set(VOICE_COMMAND_SOURCES
+    # Command framework
     src/command/dispatcher/commanddispatcher.cpp
     src/command/context/commandcontext.cpp
     src/command/descriptor/commanddescriptor.cpp
     src/command/registry/commandregistry.cpp
     src/command/nlu/llm_nlu_engine.cpp
     src/command/nlu/rule_based_nlu_engine.cpp
+    # Engine wrappers
+    src/audio_engine.cpp
+    src/whisper_engine.cpp
+    # Recognition strategies
+    src/guided_recognition_strategy.cpp
+    src/nlu_recognition_strategy.cpp
+    # Orchestration
+    src/voice_assistant.cpp
 )
 
 set(VOICE_COMMAND_HEADERS
+    # Command framework
     include/command/command_result.h
     include/command/icommand.h
     include/command/dispatcher/commanddispatcher.h
@@ -82,6 +95,13 @@ set(VOICE_COMMAND_HEADERS
     include/command/nlu/inlu_engine.h
     include/command/nlu/llm_nlu_engine.h
     include/command/nlu/rule_based_nlu_engine.h
+    # Engine wrappers
+    include/audio_engine.h
+    include/whisper_engine.h
+    # Recognition strategies
+    include/recognition_strategy.h
+    # Orchestration
+    include/voice_assistant.h
 )
 
 # Create the main library
@@ -102,6 +122,7 @@ set_target_properties(voice_command PROPERTIES
 target_link_libraries(voice_command
     PUBLIC
         whisper-cpp::whisper-cpp
+        audio_capture
         # nlohmann_json::nlohmann_json
         # spdlog::spdlog
 )
@@ -164,9 +185,6 @@ target_compile_definitions(voice_command
 #         endif()
 #     endif()
 # endif()
-
-# Audio capture library
-add_subdirectory(src/audio_capture)
 
 # Examples
 if(VOICE_COMMAND_BUILD_EXAMPLES)
