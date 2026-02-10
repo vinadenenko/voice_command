@@ -1,6 +1,8 @@
 #include "recognition_strategy.h"
 
 #include <cmath>
+#include <chrono>
+#include <cstdio>
 
 namespace voice_command {
 
@@ -30,8 +32,12 @@ RecognitionResult NluRecognitionStrategy::Recognize(
         return result;
     }
 
-    // Step 1: Transcribe audio to text
+    // Step 1: Transcribe audio to text with timing
+    auto start = std::chrono::high_resolution_clock::now();
     auto transcription = whisper_engine_->Transcribe(samples);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    fprintf(stdout, "[Whisper] Transcription took %ld ms\n", duration_ms);
 
     if (!transcription.success) {
         result.error = "Transcription failed: " + transcription.error;

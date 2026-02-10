@@ -100,12 +100,11 @@ public:
             }
         }
 
-        fprintf(stdout, "\n");
-        fprintf(stdout, "========================================\n");
-        fprintf(stdout, " Zooming to level %d\n", level);
-        fprintf(stdout, " Transcript: %s\n", context.GetRawTranscript().c_str());
-        fprintf(stdout, "========================================\n");
-        fprintf(stdout, "\n");
+        qDebug().noquote()
+            << "\n========================================"
+            << "\nZooming to level" << level
+            << "\nTranscript:" << context.GetRawTranscript().c_str()
+            << "\n========================================\n";
         return voice_command::CommandResult::kSuccess;
     }
 

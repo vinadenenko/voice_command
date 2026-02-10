@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <cstdio>
 
 namespace voice_command {
 
@@ -68,8 +70,12 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
         return result;
     }
 
-    // Perform guided matching
+    // Perform guided matching with timing
+    auto start = std::chrono::high_resolution_clock::now();
     auto match_result = whisper_engine_->GuidedMatch(samples, all_phrases_);
+    auto end = std::chrono::high_resolution_clock::now();
+    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
+    fprintf(stdout, "[Whisper] Guided matching took %ld ms\n", duration_ms);
 
     if (!match_result.success) {
         result.error = match_result.error;
