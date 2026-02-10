@@ -1,14 +1,15 @@
 cmake_minimum_required(VERSION 3.20)
-project(VoiceCommand
-    VERSION 0.1.0
-    DESCRIPTION "no desc"
-    LANGUAGES CXX
-)
 
 # C++ standard and project options
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+project(VoiceCommand
+    VERSION 0.1.0
+    DESCRIPTION "no desc"
+    LANGUAGES CXX
+)
 
 # Build options
 #option(VOICE_COMMAND_BUILD_TESTS "Build unit tests" ON)

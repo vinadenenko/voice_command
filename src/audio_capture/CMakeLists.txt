@@ -36,7 +36,10 @@ endif()
 
 # Qt backend
 if(VOICE_COMMAND_AUDIO_QT)
-    message(STATUS "audio_capture: Qt backend enabled (placeholder)")
+    find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)
+
+    message(STATUS "audio_capture: Qt6 backend enabled")
+    message(STATUS "audio_capture: Qt6_VERSION = ${Qt6_VERSION}")
 
     list(APPEND AUDIO_CAPTURE_SOURCES
         qt/qt_audio_capture.cpp
@@ -70,7 +73,10 @@ endif()
 
 # Link Qt if enabled
 if(VOICE_COMMAND_AUDIO_QT)
-    # Qt linking will be added when implemented
+    # Enable AUTOMOC for Qt's moc processing (required for Q_OBJECT in cpp files)
+    set_target_properties(audio_capture PROPERTIES AUTOMOC ON)
+
+    target_link_libraries(audio_capture PRIVATE Qt6::Core Qt6::Multimedia)
     target_compile_definitions(audio_capture PUBLIC VOICE_COMMAND_AUDIO_QT_ENABLED)
 endif()
 
