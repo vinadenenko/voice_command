@@ -164,6 +164,9 @@ target_compile_definitions(voice_command
 #     endif()
 # endif()
 
+# Audio capture library
+add_subdirectory(src/audio_capture)
+
 # Examples
 if(VOICE_COMMAND_BUILD_EXAMPLES)
     add_subdirectory(examples)
