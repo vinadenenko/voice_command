@@ -1,8 +1,8 @@
 # audio_capture library CMake configuration
 
 # Build options for audio backends
-option(VOICE_COMMAND_AUDIO_SDL "Build SDL2 audio capture backend" ON)
-option(VOICE_COMMAND_AUDIO_QT "Build Qt audio capture backend" OFF)
+option(VOICE_COMMAND_AUDIO_SDL "Build SDL2 audio capture backend" OFF)
+option(VOICE_COMMAND_AUDIO_QT "Build Qt audio capture backend" ON)
 
 # Core source files (always included)
 set(AUDIO_CAPTURE_SOURCES
