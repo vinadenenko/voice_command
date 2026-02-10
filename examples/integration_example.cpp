@@ -13,6 +13,7 @@
 
 #include <QCoreApplication>
 #include <QTimer>
+#include <qt_voice_assistant.h>
 
 #include <atomic>
 #include <chrono>
@@ -289,12 +290,13 @@ int main(int argc, char** argv) {
 
     voice_command::audio_capture::VadConfig vad_config;
     vad_config.window_ms = 1000;
-    vad_config.energy_threshold = 0.6f;
+    vad_config.energy_threshold = 0.1f;
     vad_config.freq_threshold = 100.0f;
     vad_config.sample_rate = 16000;
 
     // Configure voice assistant with Qt audio backend
-    voice_command::VoiceAssistantConfig config;
+    // voice_command::VoiceAssistantConfig config;
+    voice_command::QtVoiceAssistantConfig config;
     config.audio_config =
         voice_command::AudioEngine::CreateQtConfig(audio_capture_config, vad_config);
 
@@ -312,7 +314,7 @@ int main(int argc, char** argv) {
     auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
 
     // Create voice assistant
-    voice_command::VoiceAssistant assistant;
+    voice_command::QtVoiceAssistant assistant;
 
     fprintf(stderr, "Initializing voice assistant...\n");
     fprintf(stderr, "  Model: %s\n", app_config.model_path.c_str());
@@ -335,7 +337,7 @@ int main(int argc, char** argv) {
 
     // Set up callbacks
     assistant.SetSpeechDetectedCallback([]() {
-        fprintf(stdout, "[Speech detected, processing...]\n");
+        qDebug() << "Speech detected, processing";
     });
 
     assistant.SetCommandCallback(

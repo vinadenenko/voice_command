@@ -47,7 +47,7 @@ option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" ON)
 #         add_compile_definitions(VOICE_COMMAND_OPENGL_DEBUG)
 #     endif()
 # endif()
-
+find_package(Qt6 REQUIRED COMPONENTS Core)
 # Find required packages
 find_package(whisper-cpp REQUIRED)
 # find_package(nlohmann_json REQUIRED)
@@ -82,6 +82,7 @@ set(VOICE_COMMAND_SOURCES
     src/nlu_recognition_strategy.cpp
     # Orchestration
     src/voice_assistant.cpp
+    src/qt_voice_assistant.cpp
 )
 
 set(VOICE_COMMAND_HEADERS
@@ -102,6 +103,7 @@ set(VOICE_COMMAND_HEADERS
     include/recognition_strategy.h
     # Orchestration
     include/voice_assistant.h
+    include/qt_voice_assistant.h
 )
 
 # Create the main library
@@ -123,10 +125,13 @@ target_link_libraries(voice_command
     PUBLIC
         whisper-cpp::whisper-cpp
         audio_capture
+        Qt6::Core
         # nlohmann_json::nlohmann_json
         # spdlog::spdlog
 )
-
+set_target_properties(voice_command PROPERTIES
+    AUTOMOC ON
+)
 # Include directories for the library
 target_include_directories(voice_command
     PUBLIC

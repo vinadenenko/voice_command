@@ -1,16 +1,26 @@
-#include "voice_assistant.h"
+/// QtVoiceAssistant Implementation (Timer-based Audio Capture)
+
+#include "qt_voice_assistant.h"
+
+#include <QTimer>
 
 #include <chrono>
 #include <iostream>
+#include <qdebug.h>
 
 namespace voice_command {
 
-VoiceAssistant::VoiceAssistant()
-    : audio_engine_(std::make_unique<AudioEngine>()),
+QtVoiceAssistant::QtVoiceAssistant(QObject* parent)
+    : QObject(parent),
+      audio_engine_(std::make_unique<AudioEngine>()),
       whisper_engine_(std::make_unique<WhisperEngine>()),
-      registry_(std::make_unique<CommandRegistry>()) {}
+      registry_(std::make_unique<CommandRegistry>()) {
+    // Create the audio timer
+    audio_timer_ = new QTimer(this);
+    connect(audio_timer_, &QTimer::timeout, this, &QtVoiceAssistant::OnAudioTimer);
+}
 
-VoiceAssistant::~VoiceAssistant() {
+QtVoiceAssistant::~QtVoiceAssistant() {
     if (running_) {
         Stop();
     }
@@ -19,10 +29,11 @@ VoiceAssistant::~VoiceAssistant() {
     }
 }
 
-bool VoiceAssistant::Init(const VoiceAssistantConfig& config,
-                          std::unique_ptr<INluEngine> nlu_engine) {
+bool QtVoiceAssistant::Init(const QtVoiceAssistantConfig& config,
+                            std::unique_ptr<INluEngine> nlu_engine) {
     if (initialized_) {
-        return false;  // Already initialized
+        qWarning() << "[QtVoiceAssistant] ERROR: Already initialized";
+        return false;
     }
 
     config_ = config;
@@ -30,17 +41,20 @@ bool VoiceAssistant::Init(const VoiceAssistantConfig& config,
 
     // Initialize audio engine
     if (!audio_engine_->Init(config.audio_config)) {
+        qWarning() << "[QtVoiceAssistant] ERROR: Audio engine init failed";
         return false;
     }
 
     // Initialize whisper engine
     if (!whisper_engine_->Init(config.whisper_config)) {
+        qWarning() << "[QtVoiceAssistant] ERROR: Whisper engine init failed";
         audio_engine_->Shutdown();
         return false;
     }
 
     // Initialize NLU engine if provided
     if (nlu_engine_ && !nlu_engine_->Init()) {
+        qWarning() << "[QtVoiceAssistant] ERROR: NLU engine init failed";
         whisper_engine_->Shutdown();
         audio_engine_->Shutdown();
         return false;
@@ -53,7 +67,7 @@ bool VoiceAssistant::Init(const VoiceAssistantConfig& config,
     return true;
 }
 
-void VoiceAssistant::Shutdown() {
+void QtVoiceAssistant::Shutdown() {
     if (!initialized_) {
         return;
     }
@@ -71,11 +85,11 @@ void VoiceAssistant::Shutdown() {
     initialized_ = false;
 }
 
-bool VoiceAssistant::IsInitialized() const {
+bool QtVoiceAssistant::IsInitialized() const {
     return initialized_;
 }
 
-bool VoiceAssistant::Start() {
+bool QtVoiceAssistant::Start() {
     if (!initialized_ || running_) {
         return false;
     }
@@ -84,37 +98,43 @@ bool VoiceAssistant::Start() {
     SelectStrategy();
 
     if (!strategy_) {
+        qWarning() << "[QtVoiceAssistant] ERROR: No strategy selected";
         return false;
     }
 
     // Start audio capture
     if (!audio_engine_->Start()) {
+        qWarning() << "[QtVoiceAssistant] ERROR: Audio engine start failed";
         return false;
     }
 
     running_ = true;
 
-    // Start threads
-    audio_thread_ = std::thread(&VoiceAssistant::AudioThreadFunc, this);
-    processing_thread_ = std::thread(&VoiceAssistant::ProcessingThreadFunc, this);
+    // Configure and start the audio timer (replaces audio thread)
+    audio_timer_->setInterval(config_.poll_interval_ms);
+    audio_timer_->start();
 
+    // Start processing thread
+    processing_thread_ = std::thread(&QtVoiceAssistant::ProcessingThreadFunc, this);
+
+    qDebug() << "[QtVoiceAssistant] Started - listening for commands";
     return true;
 }
 
-void VoiceAssistant::Stop() {
+void QtVoiceAssistant::Stop() {
     if (!running_) {
         return;
     }
 
     running_ = false;
 
+    // Stop the audio timer
+    audio_timer_->stop();
+
     // Wake up processing thread
     queue_cv_.notify_all();
 
-    // Wait for threads to finish
-    if (audio_thread_.joinable()) {
-        audio_thread_.join();
-    }
+    // Wait for processing thread to finish
     if (processing_thread_.joinable()) {
         processing_thread_.join();
     }
@@ -131,103 +151,92 @@ void VoiceAssistant::Stop() {
     }
 }
 
-bool VoiceAssistant::IsRunning() const {
+bool QtVoiceAssistant::IsRunning() const {
     return running_;
 }
 
-CommandRegistry* VoiceAssistant::GetRegistry() {
+CommandRegistry* QtVoiceAssistant::GetRegistry() {
     return registry_.get();
 }
 
-const CommandRegistry* VoiceAssistant::GetRegistry() const {
+const CommandRegistry* QtVoiceAssistant::GetRegistry() const {
     return registry_.get();
 }
 
-void VoiceAssistant::SetCommandCallback(CommandCallback callback) {
+void QtVoiceAssistant::SetCommandCallback(QtCommandCallback callback) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     command_callback_ = std::move(callback);
 }
 
-void VoiceAssistant::SetErrorCallback(ErrorCallback callback) {
+void QtVoiceAssistant::SetErrorCallback(QtErrorCallback callback) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     error_callback_ = std::move(callback);
 }
 
-void VoiceAssistant::SetUnrecognizedCallback(UnrecognizedCallback callback) {
+void QtVoiceAssistant::SetUnrecognizedCallback(QtUnrecognizedCallback callback) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     unrecognized_callback_ = std::move(callback);
 }
 
-void VoiceAssistant::SetSpeechDetectedCallback(SpeechDetectedCallback callback) {
+void QtVoiceAssistant::SetSpeechDetectedCallback(QtSpeechDetectedCallback callback) {
     std::lock_guard<std::mutex> lock(callback_mutex_);
     speech_detected_callback_ = std::move(callback);
 }
 
-void VoiceAssistant::SetForceNluStrategy(bool use_nlu) {
+void QtVoiceAssistant::SetForceNluStrategy(bool use_nlu) {
     config_.force_nlu_strategy = use_nlu;
     if (running_) {
         SelectStrategy();
     }
 }
 
-const VoiceAssistantConfig& VoiceAssistant::GetConfig() const {
+const QtVoiceAssistantConfig& QtVoiceAssistant::GetConfig() const {
     return config_;
 }
 
-void VoiceAssistant::AudioThreadFunc() {
+void QtVoiceAssistant::OnAudioTimer() {
+    // This runs on the main thread via QTimer
     audio_capture::AudioSamples samples;
 
-    // Wait a bit for audio to stabilize
-    std::this_thread::sleep_for(
-        std::chrono::milliseconds(config_.poll_interval_ms));
-    audio_engine_->ClearBuffer();
+    // Get audio for VAD check
+    audio_engine_->GetAudio(config_.vad_check_duration_ms, samples);
 
-    while (running_) {
-        // Sleep between checks
-        std::this_thread::sleep_for(
-            std::chrono::milliseconds(config_.poll_interval_ms));
+    // Check for speech
+    auto vad_result = audio_engine_->DetectSpeech(samples);
 
-        if (!running_) {
-            break;
+    if (vad_result.speech_ended) {
+        qDebug() << "[QtVoiceAssistant] Speech detected";
+        
+        // Notify speech detected
+        {
+            std::lock_guard<std::mutex> lock(callback_mutex_);
+            if (speech_detected_callback_) {
+                speech_detected_callback_();
+            }
         }
 
-        // Get audio for VAD check
-        audio_engine_->GetAudio(config_.vad_check_duration_ms, samples);
+        // Get full command audio
+        audio_engine_->GetAudio(config_.command_capture_duration_ms, samples);
 
-        // Check for speech
-        auto vad_result = audio_engine_->DetectSpeech(samples);
+        // Queue for processing
+        {
+            std::lock_guard<std::mutex> lock(queue_mutex_);
 
-        if (vad_result.speech_ended) {
-            // Notify speech detected
-            {
-                std::lock_guard<std::mutex> lock(callback_mutex_);
-                if (speech_detected_callback_) {
-                    speech_detected_callback_();
-                }
+            // Check queue depth limit
+            if (audio_queue_.size() < config_.max_queue_depth) {
+                audio_queue_.push(std::move(samples));
+                queue_cv_.notify_one();
+            } else {
+                qWarning() << "[QtVoiceAssistant] WARNING: Queue full, dropping audio";
             }
-
-            // Get full command audio
-            audio_engine_->GetAudio(config_.command_capture_duration_ms, samples);
-
-            // Queue for processing
-            {
-                std::lock_guard<std::mutex> lock(queue_mutex_);
-
-                // Check queue depth limit
-                if (audio_queue_.size() < config_.max_queue_depth) {
-                    audio_queue_.push(std::move(samples));
-                    queue_cv_.notify_one();
-                }
-                // If queue is full, drop audio (prevents memory issues)
-            }
-
-            // Clear audio buffer
-            audio_engine_->ClearBuffer();
         }
+
+        // Clear audio buffer
+        audio_engine_->ClearBuffer();
     }
 }
 
-void VoiceAssistant::ProcessingThreadFunc() {
+void QtVoiceAssistant::ProcessingThreadFunc() {
     audio_capture::AudioSamples samples;
 
     while (running_) {
@@ -255,7 +264,7 @@ void VoiceAssistant::ProcessingThreadFunc() {
     }
 }
 
-void VoiceAssistant::SelectStrategy() {
+void QtVoiceAssistant::SelectStrategy() {
     if (!initialized_) {
         return;
     }
@@ -282,8 +291,9 @@ void VoiceAssistant::SelectStrategy() {
     }
 }
 
-void VoiceAssistant::ProcessAudio(const audio_capture::AudioSamples& samples) {
+void QtVoiceAssistant::ProcessAudio(const audio_capture::AudioSamples& samples) {
     if (!strategy_) {
+        qWarning() << "[QtVoiceAssistant] ERROR: No recognition strategy";
         return;
     }
 
@@ -294,12 +304,21 @@ void VoiceAssistant::ProcessAudio(const audio_capture::AudioSamples& samples) {
         // Notify unrecognized or error
         std::lock_guard<std::mutex> lock(callback_mutex_);
         if (!recognition.raw_transcript.empty() && unrecognized_callback_) {
+            qWarning() << "[QtVoiceAssistant] Unrecognized:" << recognition.raw_transcript.c_str();
             unrecognized_callback_(recognition.raw_transcript);
         } else if (error_callback_ && !recognition.error.empty()) {
+            qWarning() << "[QtVoiceAssistant] Error:" << recognition.error.c_str();
             error_callback_(recognition.error);
         }
         return;
     }
+
+    qDebug().noquote()
+        << "[QtVoiceAssistant] Recognized:"
+        << "'" << recognition.raw_transcript.c_str() << "'"
+        << "->"
+        << "'" << recognition.command_name.c_str() << "'"
+        << "(" << qRound(recognition.confidence * 100.0f) << "%)";
 
     // Build command context
     CommandContext context;
@@ -311,14 +330,12 @@ void VoiceAssistant::ProcessAudio(const audio_capture::AudioSamples& samples) {
     }
 
     // Dispatch command
-    CommandResult result =
-        dispatcher_->Dispatch(recognition.command_name, std::move(context));
+    CommandResult result = dispatcher_->Dispatch(recognition.command_name, std::move(context));
 
     // Notify callback
     {
         std::lock_guard<std::mutex> lock(callback_mutex_);
         if (command_callback_) {
-            // Rebuild context for callback (original was moved)
             CommandContext cb_context;
             cb_context.SetRawTranscript(recognition.raw_transcript);
             cb_context.SetConfidence(recognition.confidence);
