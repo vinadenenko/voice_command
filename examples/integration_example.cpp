@@ -183,8 +183,8 @@ void RegisterCommands(voice_command::CommandRegistry* registry) {
         level_param.name = "level";
         level_param.type = voice_command::ParamType::kInteger;
         level_param.description = "Zoom level (1-20)";
-        level_param.required = false;
-        level_param.default_value = "10";
+        level_param.required = true;
+        // level_param.default_value = "10";
         level_param.min_value = 1;
         level_param.max_value = 20;
         desc.parameters.push_back(level_param);
@@ -358,8 +358,7 @@ int main(int argc, char** argv) {
                     result_str = "not handled";
                     break;
             }
-            fprintf(stdout, "[Command '%s' executed: %s]\n", command_name.c_str(),
-                    result_str);
+            qDebug() << QString("[Command '%1' executed: %2]").arg(command_name.c_str(), result_str);
         });
 
     assistant.SetUnrecognizedCallback([](const std::string& transcript) {
