@@ -243,18 +243,26 @@ std::string RuleBasedNluEngine::ExtractParamValue(
                 return integers[0].first;
             }
 
-            // Multiple integers: find one closest to parameter keyword
+            // Multiple integers: find one associated with parameter keyword
             std::string param_keyword = ToLower(param.name);
             std::replace(param_keyword.begin(), param_keyword.end(), '_', ' ');
 
             size_t keyword_pos = FindKeyword(text, param_keyword);
             if (keyword_pos == std::string::npos) {
-                // Try finding keyword in description
-                // For now, just return first integer
+                // No keyword found, fall back to first integer
                 return integers[0].first;
             }
 
-            // Find integer closest to keyword
+            // Find the first integer that comes AFTER the keyword
+            // This handles "brightness 80 contrast 60" correctly
+            size_t keyword_end = keyword_pos + param_keyword.length();
+            for (const auto& [value, pos] : integers) {
+                if (pos >= keyword_end) {
+                    return value;
+                }
+            }
+
+            // Fallback: find integer closest to keyword (for edge cases)
             size_t min_distance = std::numeric_limits<size_t>::max();
             std::string closest_value;
             for (const auto& [value, pos] : integers) {
@@ -271,7 +279,28 @@ std::string RuleBasedNluEngine::ExtractParamValue(
         case ParamType::kDouble: {
             auto numbers = FindDoubles(text);
             if (numbers.empty()) return "";
-            // Similar logic to kInteger
+
+            if (numbers.size() == 1) {
+                return numbers[0].first;
+            }
+
+            // Multiple numbers: find one associated with parameter keyword
+            std::string param_keyword = ToLower(param.name);
+            std::replace(param_keyword.begin(), param_keyword.end(), '_', ' ');
+
+            size_t keyword_pos = FindKeyword(text, param_keyword);
+            if (keyword_pos == std::string::npos) {
+                return numbers[0].first;
+            }
+
+            // Find the first number that comes AFTER the keyword
+            size_t keyword_end = keyword_pos + param_keyword.length();
+            for (const auto& [value, pos] : numbers) {
+                if (pos >= keyword_end) {
+                    return value;
+                }
+            }
+
             return numbers[0].first;
         }
 
