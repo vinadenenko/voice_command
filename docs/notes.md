@@ -95,3 +95,60 @@ Recommendations
   3. Optional: UI-thread execution mode for Qt - QtVoiceAssistant::SetExecuteOnUiThread(true) that uses
   QMetaObject::invokeMethod internally
   4. Optional: Lambda command support - For simple commands where a full class is overkill
+
+
+
+
+## Idea about getting rid of ICommand:
+  If we get rid of that ICommand, we can make possible a way of just providing some commands.json and just react in callback                                                                   
+ That would be a much cleaner design:
+
+  Current (complex):
+  // 1. Define schema                                         
+  CommandDescriptor desc;                                                                                              
+  desc.name = "change_color";                                 
+  desc.trigger_phrases = {"change color to"};                                                                          
+  desc.parameters = {...};                                                                                             
+                                     
+  // 2. Create command class (boilerplate)                                                                             
+  class ChangeColorCommand : public ICommand {                                                                         
+      CommandResult Execute(const CommandContext& ctx) override { ... }
+  };
+
+  // 3. Register both
+  registry->Register(desc, std::make_unique<ChangeColorCommand>());
+
+  // 4. Also handle in callback anyway...
+
+  Proposed (simple):
+  // 1. Load commands from JSON (or register schema only)
+  assistant.LoadCommands("commands.json");
+
+  // 2. Handle everything in callback
+  assistant.SetCommandCallback([&app](const std::string& cmd, const CommandContext& ctx) {
+      if (cmd == "change_color") {
+          app.setColor(ctx.GetParam("color").AsString());
+      } else if (cmd == "zoom_to") {
+          app.setZoom(ctx.GetParam("level").AsInt());
+      }
+  });
+
+  commands.json:
+  {
+    "commands": [
+      {
+        "name": "change_color",
+        "triggers": ["change color to", "set color to"],
+        "parameters": [
+          {"name": "color", "type": "string", "required": true}
+        ]
+      }
+    ]
+  }
+
+  Benefits:
+  - No ICommand classes needed
+  - Commands defined declaratively (JSON = hot-reloadable, no recompile)
+  - Single callback handles everything in user's context
+  - No awkward dependency injection
+  - Cleaner separation: library recognizes, user acts
