@@ -58,35 +58,37 @@ NluResult RuleBasedNluEngine::Process(
         return result;
     }
 
-    // Step 1: Match intent
-    auto [matched_descriptor, confidence] = MatchIntent(transcript, schemas);
+    // Step 1: Match intent (get descriptor, confidence, and matched trigger)
+    auto intent_match = MatchIntent(transcript, schemas);
 
-    if (!matched_descriptor || confidence < min_confidence_) {
+    if (!intent_match.descriptor || intent_match.confidence < min_confidence_) {
         result.success = false;
         result.error_message = "No matching command found (confidence too low)";
         return result;
     }
 
-    // Step 2: Extract parameters
-    auto params = ExtractParams(transcript, *matched_descriptor);
+    // Step 2: Extract arguments region (transcript minus the trigger phrase)
+    std::string args_region = ExtractArgumentsRegion(transcript, intent_match.matched_trigger);
 
-    // Step 3: Build result
+    // Step 3: Extract parameters from arguments region
+    auto params = ExtractParams(args_region, *intent_match.descriptor);
+
+    // Step 4: Build result
     result.success = true;
-    result.command_name = matched_descriptor->name;
-    result.confidence = confidence;
+    result.command_name = intent_match.descriptor->name;
+    result.confidence = intent_match.confidence;
     result.extracted_params = std::move(params);
 
     return result;
 }
 
-std::pair<const CommandDescriptor*, float> RuleBasedNluEngine::MatchIntent(
+RuleBasedNluEngine::IntentMatch RuleBasedNluEngine::MatchIntent(
     const std::string& transcript,
     const std::vector<const CommandDescriptor*>& schemas) const {
 
     std::string normalized_transcript = Normalize(transcript);
 
-    const CommandDescriptor* best_match = nullptr;
-    float best_score = 0.0f;
+    IntentMatch best_match;
 
     for (const auto* descriptor : schemas) {
         // Check similarity against each trigger phrase
@@ -100,9 +102,10 @@ std::pair<const CommandDescriptor*, float> RuleBasedNluEngine::MatchIntent(
                 score = std::max(score, 0.8f);
             }
 
-            if (score > best_score) {
-                best_score = score;
-                best_match = descriptor;
+            if (score > best_match.confidence) {
+                best_match.confidence = score;
+                best_match.descriptor = descriptor;
+                best_match.matched_trigger = trigger;
             }
         }
 
@@ -111,13 +114,100 @@ std::pair<const CommandDescriptor*, float> RuleBasedNluEngine::MatchIntent(
         // Replace underscores with spaces for comparison
         std::replace(normalized_name.begin(), normalized_name.end(), '_', ' ');
         float name_score = ComputeSimilarity(normalized_transcript, normalized_name);
-        if (name_score > best_score) {
-            best_score = name_score;
-            best_match = descriptor;
+        if (name_score > best_match.confidence) {
+            best_match.confidence = name_score;
+            best_match.descriptor = descriptor;
+            // Use command name as pseudo-trigger for args extraction
+            best_match.matched_trigger = descriptor->name;
+            std::replace(best_match.matched_trigger.begin(),
+                         best_match.matched_trigger.end(), '_', ' ');
         }
     }
 
-    return {best_match, best_score};
+    return best_match;
+}
+
+std::string RuleBasedNluEngine::ExtractArgumentsRegion(
+    const std::string& transcript,
+    const std::string& matched_trigger) const {
+
+    std::string normalized_transcript = Normalize(transcript);
+    std::string normalized_trigger = Normalize(matched_trigger);
+
+    // Find where the trigger phrase appears in the transcript
+    size_t trigger_pos = normalized_transcript.find(normalized_trigger);
+
+    if (trigger_pos != std::string::npos) {
+        // Extract everything after the trigger phrase
+        size_t args_start = trigger_pos + normalized_trigger.length();
+
+        // Skip leading whitespace
+        while (args_start < normalized_transcript.length() &&
+               std::isspace(static_cast<unsigned char>(normalized_transcript[args_start]))) {
+            args_start++;
+        }
+
+        if (args_start < normalized_transcript.length()) {
+            return normalized_transcript.substr(args_start);
+        }
+        return "";
+    }
+
+    // Trigger not found exactly - try word-by-word matching
+    // Split transcript and trigger into words
+    std::vector<std::string> transcript_words;
+    std::vector<std::string> trigger_words;
+
+    std::istringstream transcript_stream(normalized_transcript);
+    std::istringstream trigger_stream(normalized_trigger);
+    std::string word;
+
+    while (transcript_stream >> word) {
+        transcript_words.push_back(word);
+    }
+    while (trigger_stream >> word) {
+        trigger_words.push_back(word);
+    }
+
+    if (trigger_words.empty()) {
+        return normalized_transcript;
+    }
+
+    // Find the best starting position for trigger match in transcript
+    size_t best_start = 0;
+    float best_match_score = 0.0f;
+
+    for (size_t start = 0; start <= transcript_words.size() - trigger_words.size(); start++) {
+        float match_score = 0.0f;
+        for (size_t i = 0; i < trigger_words.size() && start + i < transcript_words.size(); i++) {
+            if (transcript_words[start + i] == trigger_words[i]) {
+                match_score += 1.0f;
+            }
+        }
+        match_score /= static_cast<float>(trigger_words.size());
+
+        if (match_score > best_match_score) {
+            best_match_score = match_score;
+            best_start = start;
+        }
+    }
+
+    // If we found a reasonable match, return words after the trigger
+    if (best_match_score >= 0.5f) {
+        size_t args_start_word = best_start + trigger_words.size();
+        if (args_start_word < transcript_words.size()) {
+            std::string result;
+            for (size_t i = args_start_word; i < transcript_words.size(); i++) {
+                if (!result.empty()) result += " ";
+                result += transcript_words[i];
+            }
+            return result;
+        }
+        return "";
+    }
+
+    // Fallback: return original transcript (no trigger found)
+    return normalized_transcript;
 }
 
 std::unordered_map<std::string, std::string> RuleBasedNluEngine::ExtractParams(
@@ -213,8 +303,10 @@ std::string RuleBasedNluEngine::ExtractParamValue(
         }
 
         case ParamType::kString: {
-            // String extraction is more complex
-            // Try to find value after prepositions like "to", "at", "near", "called"
+            // String extraction from arguments region
+            // The text has already had the trigger phrase stripped, so it may
+            // contain just the value itself (e.g., "red" from "change color to red")
+
             std::vector<std::string> prepositions = {"to", "at", "near", "called", "named"};
 
             std::string param_keyword = ToLower(param.name);
@@ -228,9 +320,6 @@ std::string RuleBasedNluEngine::ExtractParamValue(
                 while (start < text.length() && std::isspace(text[start])) start++;
 
                 if (start < text.length()) {
-                    // Take remaining text or until next known keyword
-                    size_t end = text.length();
-                    // Simple heuristic: take up to 3 words
                     std::istringstream iss(text.substr(start));
                     std::string word;
                     std::string result;
@@ -259,7 +348,6 @@ std::string RuleBasedNluEngine::ExtractParamValue(
                     while (start < text.length() && std::isspace(text[start])) start++;
 
                     if (start < text.length()) {
-                        // Take remaining words (simplified)
                         std::istringstream iss(text.substr(start));
                         std::string word;
                         std::string result;
@@ -278,6 +366,24 @@ std::string RuleBasedNluEngine::ExtractParamValue(
                             return result;
                         }
                     }
+                }
+            }
+
+            // Third try: if no keyword or preposition found, use the entire text
+            // This handles the case where the arguments region is just the value
+            // (e.g., "red" after stripping trigger "change color to")
+            if (!text.empty()) {
+                std::string result = text;
+                // Strip trailing punctuation
+                while (!result.empty() &&
+                       std::ispunct(static_cast<unsigned char>(result.back()))) {
+                    result.pop_back();
+                }
+                // Strip leading/trailing whitespace
+                size_t start = result.find_first_not_of(" \t");
+                if (start != std::string::npos) {
+                    size_t end = result.find_last_not_of(" \t");
+                    return result.substr(start, end - start + 1);
                 }
             }
 

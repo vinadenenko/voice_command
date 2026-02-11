@@ -4,6 +4,7 @@
 #include "command/nlu/inlu_engine.h"
 
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -31,15 +32,28 @@ public:
     float GetMinConfidence() const { return min_confidence_; }
 
 private:
+    // Result of intent matching: descriptor, confidence, matched trigger phrase.
+    struct IntentMatch {
+        const CommandDescriptor* descriptor = nullptr;
+        float confidence = 0.0f;
+        std::string matched_trigger;
+    };
+
     // Intent matching using trigger phrase similarity.
-    // Returns the best matching command descriptor and confidence score.
-    std::pair<const CommandDescriptor*, float> MatchIntent(
+    // Returns the best matching command descriptor, confidence score, and matched trigger.
+    IntentMatch MatchIntent(
         const std::string& transcript,
         const std::vector<const CommandDescriptor*>& schemas) const;
 
-    // Extract all parameters from transcript based on command schema.
-    std::unordered_map<std::string, std::string> ExtractParams(
+    // Extract the arguments region from transcript by removing the trigger phrase.
+    // Returns the portion of transcript after the matched trigger phrase.
+    std::string ExtractArgumentsRegion(
         const std::string& transcript,
+        const std::string& matched_trigger) const;
+
+    // Extract all parameters from the arguments region based on command schema.
+    std::unordered_map<std::string, std::string> ExtractParams(
+        const std::string& arguments_region,
         const CommandDescriptor& descriptor) const;
 
     // Extract value for a specific parameter based on its type.
