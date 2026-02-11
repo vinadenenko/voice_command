@@ -1,6 +1,7 @@
 #ifndef VOICE_COMMAND_RECOGNITION_STRATEGY_H
 #define VOICE_COMMAND_RECOGNITION_STRATEGY_H
 
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -32,6 +33,11 @@ struct RecognitionResult {
 
     /// Error message if !success
     std::string error;
+
+    // Timing breakdown (measured by caller, not implementations)
+    int64_t asr_time_ms = 0;    ///< ASR (speech-to-text) processing time
+    int64_t nlu_time_ms = 0;    ///< NLU (intent/param extraction) time
+    int64_t total_time_ms = 0;  ///< Total recognition pipeline time
 };
 
 /// Abstract interface for recognition strategies

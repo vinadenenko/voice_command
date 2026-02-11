@@ -4,7 +4,6 @@
 
 #include <QTimer>
 
-#include <QElapsedTimer>
 #include <chrono>
 #include <iostream>
 #include <qdebug.h>
@@ -299,10 +298,10 @@ void QtVoiceAssistant::ProcessAudio(const audio_capture::AudioSamples& samples) 
     }
 
     // Recognize command
-    QElapsedTimer recognitionTimer;
-    recognitionTimer.start();
     auto recognition = strategy_->Recognize(samples);
-    qDebug() << "Recognition took" << recognitionTimer.elapsed() << "ms";
+    qDebug() << "[Timing] ASR: " << recognition.asr_time_ms
+             << "ms, NLU: " << recognition.nlu_time_ms
+             << "ms, Total: " << recognition.total_time_ms << "ms";
 
     if (!recognition.success) {
         // Notify unrecognized or error

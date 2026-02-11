@@ -52,6 +52,8 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
     const audio_capture::AudioSamples& samples) {
     RecognitionResult result;
 
+    auto total_start = std::chrono::steady_clock::now();
+
     if (whisper_engine_ == nullptr || !whisper_engine_->IsInitialized()) {
         result.error = "Whisper engine not initialized";
         return result;
@@ -67,24 +69,33 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
 
     if (all_phrases_.empty()) {
         result.error = "No trigger phrases registered";
+        result.total_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - total_start).count();
         return result;
     }
 
-    // Perform guided matching with timing
-    auto start = std::chrono::high_resolution_clock::now();
+    // Perform guided matching (measure ASR time)
+    auto asr_start = std::chrono::steady_clock::now();
     auto match_result = whisper_engine_->GuidedMatch(samples, all_phrases_);
-    auto end = std::chrono::high_resolution_clock::now();
-    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-    fprintf(stdout, "[Whisper] Guided matching took %ld ms\n", duration_ms);
+    auto asr_end = std::chrono::steady_clock::now();
+    result.asr_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        asr_end - asr_start).count();
+
+    // No NLU step in guided recognition
+    result.nlu_time_ms = 0;
 
     if (!match_result.success) {
         result.error = match_result.error;
+        result.total_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - total_start).count();
         return result;
     }
 
     // Check confidence threshold
     if (match_result.best_score < min_confidence_) {
         result.error = "Confidence below threshold";
+        result.total_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - total_start).count();
         return result;
     }
 
@@ -92,6 +103,8 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
     auto it = phrase_to_command_.find(ToLower(match_result.best_match));
     if (it == phrase_to_command_.end()) {
         result.error = "Matched phrase not found in mapping";
+        result.total_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - total_start).count();
         return result;
     }
 
@@ -100,6 +113,9 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
     result.confidence = match_result.best_score;
     result.raw_transcript = match_result.best_match;
     // No parameters for guided recognition
+
+    result.total_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - total_start).count();
 
     return result;
 }
