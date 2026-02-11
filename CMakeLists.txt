@@ -47,7 +47,7 @@ option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" ON)
 #         add_compile_definitions(VOICE_COMMAND_OPENGL_DEBUG)
 #     endif()
 # endif()
-find_package(Qt6 REQUIRED COMPONENTS Core)
+find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)
 # Find required packages
 find_package(whisper-cpp REQUIRED)
 # find_package(nlohmann_json REQUIRED)
@@ -63,7 +63,7 @@ endif()
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # Audio capture library (must be before voice_command since it depends on it)
-add_subdirectory(src/audio_capture)
+# add_subdirectory(src/audio_capture)
 
 # Source files
 set(VOICE_COMMAND_SOURCES
@@ -106,10 +106,83 @@ set(VOICE_COMMAND_HEADERS
     include/qt_voice_assistant.h
 )
 
+set(LIBS_TO_LINK
+    whisper-cpp::whisper-cpp
+    # audio_capture
+    Qt6::Core
+    Qt6::Multimedia
+    # nlohmann_json::nlohmann_json
+    # spdlog::spdlog
+)
+
+# Build options for audio backends
+option(VOICE_COMMAND_AUDIO_SDL "Build SDL2 audio capture backend" OFF)
+option(VOICE_COMMAND_AUDIO_QT "Build Qt audio capture backend" ON)
+
+# Core source files (always included)
+set(AUDIO_CAPTURE_SOURCES
+    ${CMAKE_SOURCE_DIR}/src/audio_capture/vad/simple_vad.cpp
+)
+
+set(AUDIO_CAPTURE_HEADERS
+    ${CMAKE_SOURCE_DIR}/include/audio_capture/audio_capture_config.h
+    ${CMAKE_SOURCE_DIR}/include/audio_capture/iaudio_capture.h
+    ${CMAKE_SOURCE_DIR}/include/audio_capture/ivad.h
+    ${CMAKE_SOURCE_DIR}/include/audio_capture/vad/simple_vad.h
+)
+
+# SDL2 backend
+if(VOICE_COMMAND_AUDIO_SDL)
+    find_package(SDL2 REQUIRED)
+
+    string(STRIP "${SDL2_LIBRARIES}" SDL2_LIBRARIES)
+
+    message(STATUS "audio_capture: SDL2 backend enabled")
+    message(STATUS "audio_capture: SDL2_INCLUDE_DIRS = ${SDL2_INCLUDE_DIRS}")
+    message(STATUS "audio_capture: SDL2_LIBRARIES = ${SDL2_LIBRARIES}")
+
+    list(APPEND AUDIO_CAPTURE_SOURCES
+        sdl/sdl_audio_capture.cpp
+    )
+    list(APPEND AUDIO_CAPTURE_HEADERS
+        ${CMAKE_SOURCE_DIR}/include/audio_capture/sdl/sdl_audio_capture.h
+    )
+    target_include_directories(voice_command PUBLIC ${SDL2_INCLUDE_DIRS})
+    # target_link_libraries(voice_command PRIVATE ${SDL2_LIBRARIES})
+    list(APPEND LIBS_TO_LINK ${SDL2_LIBRARIES})
+    target_compile_definitions(voice_command PUBLIC VOICE_COMMAND_AUDIO_SDL_ENABLED)
+endif()
+
+# Qt backend
+if(VOICE_COMMAND_AUDIO_QT)
+    find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)
+
+    message(STATUS "audio_capture: Qt6 backend enabled")
+    message(STATUS "audio_capture: Qt6_VERSION = ${Qt6_VERSION}")
+
+    list(APPEND AUDIO_CAPTURE_SOURCES
+        ${CMAKE_SOURCE_DIR}/src/audio_capture/qt/qt_audio_capture.cpp
+    )
+    list(APPEND AUDIO_CAPTURE_HEADERS
+        ${CMAKE_SOURCE_DIR}/include/audio_capture/qt/qt_audio_capture.h
+    )
+
+    # target_link_libraries(voice_command PRIVATE Qt6::Core Qt6::Multimedia)
+    list(APPEND LIBS_TO_LINK Qt6::Core Qt6::Multimedia)
+
+endif()
+
 # Create the main library
 add_library(voice_command
     ${VOICE_COMMAND_SOURCES} ${VOICE_COMMAND_HEADERS}
+    ${AUDIO_CAPTURE_SOURCES} ${AUDIO_CAPTURE_HEADERS}
 )
+
+if(VOICE_COMMAND_AUDIO_QT)
+    # Enable AUTOMOC for Qt's moc processing (required for Q_OBJECT in cpp files)
+    set_target_properties(voice_command PROPERTIES AUTOMOC ON)
+    target_compile_definitions(voice_command PUBLIC VOICE_COMMAND_AUDIO_QT_ENABLED)
+endif()
 
 # Set library properties
 set_target_properties(voice_command PROPERTIES
@@ -122,12 +195,8 @@ set_target_properties(voice_command PROPERTIES
 # set_target_properties(hello PROPERTIES LINKER_LANGUAGE CXX)
 # Link libraries
 target_link_libraries(voice_command
-    PUBLIC
-        whisper-cpp::whisper-cpp
-        audio_capture
-        Qt6::Core
-        # nlohmann_json::nlohmann_json
-        # spdlog::spdlog
+    PUBLIC ${LIBS_TO_LINK}
+
 )
 set_target_properties(voice_command PROPERTIES
     AUTOMOC ON
