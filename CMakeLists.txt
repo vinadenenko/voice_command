@@ -173,7 +173,7 @@ if(VOICE_COMMAND_AUDIO_QT)
 endif()
 
 # Create the main library
-add_library(voice_command
+add_library(voice_command SHARED
     ${VOICE_COMMAND_SOURCES} ${VOICE_COMMAND_HEADERS}
     ${AUDIO_CAPTURE_SOURCES} ${AUDIO_CAPTURE_HEADERS}
 )
@@ -189,7 +189,7 @@ set_target_properties(voice_command PROPERTIES
     VERSION ${PROJECT_VERSION}
     SOVERSION ${PROJECT_VERSION_MAJOR}
     PUBLIC_HEADER "${VOICE_COMMAND_HEADERS}"
-    CXX_VISIBILITY_PRESET hidden
+    # CXX_VISIBILITY_PRESET default
     LINKER_LANGUAGE CXX
 )
 # set_target_properties(hello PROPERTIES LINKER_LANGUAGE CXX)

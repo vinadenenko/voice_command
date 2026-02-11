@@ -220,7 +220,7 @@ void RegisterCommands(voice_command::CommandRegistry* registry) {
 // ============================================================================
 
 struct AppConfig {
-    std::string model_path = "models/ggml-base.en.bin";
+    std::string model_path = "models/ggml-tiny.en.bin";
     int num_threads = 4;
     bool use_gpu = true;
     int capture_device_id = -1;
