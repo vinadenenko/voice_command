@@ -12,8 +12,8 @@ project(VoiceCommand
 )
 
 # Build options
-#option(VOICE_COMMAND_BUILD_TESTS "Build unit tests" ON)
-option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" ON)
+option(VOICE_COMMAND_BUILD_TESTS "Build tests" OFF)
+option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" OFF)
 #option(VOICE_COMMAND_BUILD_DOCS "Generate documentation" OFF)
 #option(VOICE_COMMAND_INSTALL "Generate install target" ON)
 

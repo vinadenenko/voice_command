@@ -10,7 +10,7 @@ class MyApplication(ConanFile):
     # Define dependencies
     def requirements(self):
         self.requires("voice_command/0.1.0")
-        self.requires("nlohmann_json/3.12.0")
+        # self.requires("nlohmann_json/3.12.0")
 
     # Define build tools
     #def build_requirements(self):

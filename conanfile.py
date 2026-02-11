@@ -25,8 +25,8 @@ class VoiceCommandConan(ConanFile):
     default_options = {
         "shared": False,
         "fPIC": True,
-        "with_tests": True,
-        "with_examples": True
+        "with_tests": False,
+        "with_examples": False
     }
 
     # Export sources for conan center
@@ -54,7 +54,7 @@ class VoiceCommandConan(ConanFile):
         # self.requires("nlohmann_json/3.11.2")
 
         # Logging framework
-        self.requires("spdlog/1.13.0")
+        # self.requires("spdlog/1.13.0")
 
         # Testing framework (when tests are enabled)
         if self.options.with_tests:
