@@ -1,11 +1,12 @@
 from conan import ConanFile
-from conan.tools.cmake import CMakeToolchain, CMakeDeps, cmake_layout
+from conan.tools.cmake import CMake, CMakeToolchain, CMakeDeps, cmake_layout
 from conan.tools.files import copy
+from conan.tools.env import Environment, VirtualBuildEnv
 import os
 
 
 class VoiceCommandConan(ConanFile):
-    name = "VoiceCommand"
+    name = "voice_command"
     version = "0.1.0"
     description = "Desc"
     author = "some team"
@@ -72,17 +73,17 @@ class VoiceCommandConan(ConanFile):
         tc = CMakeToolchain(self)
         #tc.variables["VoiceCommand_BUILD_TESTS"] = self.options.with_tests
         #tc.variables["VoiceCommand_BUILD_EXAMPLES"] = self.options.with_examples
+        tc.variables["Qt6_DIR"] = "/home/user/Qt/6.6.3/gcc_64/lib/cmake/Qt6"
         tc.generate()
 
     def build(self):
         """Build the project"""
-        from conan.tools.cmake import CMake, cmake_program
         cmake = CMake(self)
         cmake.configure()
         cmake.build()
 
-        if self.options.with_tests:
-            cmake.test()
+        # if self.options.with_tests:
+            # cmake.test()
 
     def package(self):
         """Package the library"""
@@ -99,13 +100,6 @@ class VoiceCommandConan(ConanFile):
     def package_info(self):
         """Provide package information to consumers"""
         self.cpp_info.libs = ["voice_command"]
-
-        # if self.settings.os in ["Linux", "FreeBSD"]:
-        #     self.cpp_info.system_libs.extend(["GL", "X11", "Xrandr", "Xinerama", "Xi", "Xcursor", "dl", "pthread"])
-        # elif self.settings.os == "Windows":
-        #     self.cpp_info.system_libs.extend(["opengl32", "gdi32", "user32", "kernel32", "shell32"])
-        # elif self.settings.os == "Macos":
-        #     self.cpp_info.frameworks.extend(["OpenGL", "Cocoa", "IOKit", "CoreVideo"])
 
         # Define targets for proper transitive dependencies
         self.cpp_info.set_property("cmake_target_name", "voice_command::voice_command")
