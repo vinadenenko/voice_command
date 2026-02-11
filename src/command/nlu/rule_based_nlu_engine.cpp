@@ -240,6 +240,11 @@ std::string RuleBasedNluEngine::ExtractParamValue(
                         result += word;
                         word_count++;
                     }
+                    // Strip trailing punctuation
+                    while (!result.empty() &&
+                           std::ispunct(static_cast<unsigned char>(result.back()))) {
+                        result.pop_back();
+                    }
                     if (!result.empty()) {
                         return result;
                     }
@@ -263,6 +268,11 @@ std::string RuleBasedNluEngine::ExtractParamValue(
                             if (!result.empty()) result += " ";
                             result += word;
                             word_count++;
+                        }
+                        // Strip trailing punctuation
+                        while (!result.empty() &&
+                               std::ispunct(static_cast<unsigned char>(result.back()))) {
+                            result.pop_back();
                         }
                         if (!result.empty()) {
                             return result;
