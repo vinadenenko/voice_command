@@ -52,3 +52,13 @@ Usage example: For example we have a raster map application and the developer wa
 I need you to write a technical design document with implementation plan of such system. It should be detailed. The code will be written in c++17 according to google coding standards. It should be fast, with solid design, scalable and reasonable.
 
 The most important part: how to handle such cases where user will say 'generate a linestring placemark with 10 vertices around New York city with dashed style and yellow color' ? As far as I understand we have to do something similar like tooling mechanism in LLMs (MCP) specifying special format for our 'tools' (commands). Or no? Tell me your thoughs about that, how this part should be done.
+
+
+TODO in final state:
+Separate the project to modular libs
+1. Separate AudioCapture interface to other lib OR
+2. Think about making voice_assistant lib to just accept interfaces and orchestrate them.
+Using this, we will be able to keep the entire library non-qt and just provide a qt subclasses of audio capture
+and voice assistant in separate 'head' library.
+Make the voice assistant interface and provide a stl implementation
+The idea: keep the lib free of qt.
