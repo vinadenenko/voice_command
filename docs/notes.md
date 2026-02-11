@@ -62,3 +62,36 @@ Using this, we will be able to keep the entire library non-qt and just provide a
 and voice assistant in separate 'head' library.
 Make the voice assistant interface and provide a stl implementation
 The idea: keep the lib free of qt.
+
+
+The ICommand::Execute() runs on the processing thread, not the Qt UI thread. 
+
+
+Verbose Registration (Minor Ergonomics)
+
+  Registering a parameterized command requires 15-20 lines of boilerplate:
+  - Create descriptor
+  - Set name, description, triggers
+  - Create each ParamDescriptor
+  - Push to parameters vector
+  - Create command instance
+  - Register
+
+  Recommendation: A builder pattern would improve ergonomics:
+  registry->Register(
+      CommandBuilder("set_color")
+          .Description("Changes the rectangle color")
+          .Triggers({"set color", "change color"})
+          .EnumParam("color", {"red", "green", "blue"}, /*required=*/true)
+          .Build(),
+      std::make_unique<SetColorCommand>(widget));
+
+
+Recommendations
+
+  1. Document thread model explicitly - Add a section in design.md about which thread commands execute on and how Qt
+  users should marshal to UI thread
+  2. Consider CommandBuilder helper - Reduces boilerplate for command registration
+  3. Optional: UI-thread execution mode for Qt - QtVoiceAssistant::SetExecuteOnUiThread(true) that uses
+  QMetaObject::invokeMethod internally
+  4. Optional: Lambda command support - For simple commands where a full class is overkill
