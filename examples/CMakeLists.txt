@@ -88,3 +88,15 @@ set_target_properties(integration_example PROPERTIES
     FOLDER "Examples"
     AUTOMOC ON
 )
+
+# Command Test Example - tests command recognition without audio
+add_executable(command_test_example
+    command_test_example.cpp
+)
+
+target_link_libraries(command_test_example
+    PRIVATE
+        voice_command
+)
+
+set_target_properties(command_test_example PROPERTIES FOLDER "Examples")
