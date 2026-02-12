@@ -45,12 +45,14 @@ target_link_libraries(appvoice_command_test_app
 )
 
 # Fix: Conan creates INTERFACE IMPORTED targets, but Qt Android deployment only
-# scans SHARED_LIBRARY targets. We manually add conan lib dirs so androiddeployqt finds them.
+# scans SHARED_LIBRARY targets. Commented: anually add conan lib dirs so androiddeployqt finds them.
+# now automatically collect all transitive conan lib dirs with generator
 if(ANDROID)
     set_property(TARGET appvoice_command_test_app APPEND PROPERTY
         _qt_android_extra_library_dirs
-        "${voice_command_LIB_DIRS_DEBUG}"
-        "${whisper-cpp_LIB_DIRS_DEBUG}"
+        # "${voice_command_LIB_DIRS_DEBUG}"
+        # "${whisper-cpp_LIB_DIRS_DEBUG}"
+        "$<TARGET_PROPERTY:voice_command::voice_command,INTERFACE_LINK_DIRECTORIES>"
     )
 endif()
 
