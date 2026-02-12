@@ -23,7 +23,7 @@ class VoiceCommandConan(ConanFile):
         "with_examples": [True, False]
     }
     default_options = {
-        "shared": False,
+        "shared": True,
         "fPIC": True,
         "with_tests": False,
         "with_examples": False
@@ -74,6 +74,14 @@ class VoiceCommandConan(ConanFile):
         #tc.variables["VoiceCommand_BUILD_TESTS"] = self.options.with_tests
         #tc.variables["VoiceCommand_BUILD_EXAMPLES"] = self.options.with_examples
         tc.variables["Qt6_DIR"] = "/home/user/Qt/6.6.3/gcc_64/lib/cmake/Qt6"
+        if self.settings.os == "Android":
+            # Android specific configuration
+            self.output.info("Building for Android!")
+            tc.variables["Qt6_DIR"] = "/home/user/Qt/6.6.3/android_arm64_v8a/lib/cmake/Qt6"
+            # API Level check
+            if self.settings.os.api_level:
+                self.output.info(f"Android API level: {self.settings.os.api_level}")
+
         tc.generate()
 
     def build(self):

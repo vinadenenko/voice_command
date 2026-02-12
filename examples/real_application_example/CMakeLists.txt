@@ -44,6 +44,16 @@ target_link_libraries(appvoice_command_test_app
     Qt6::Multimedia
 )
 
+# Fix: Conan creates INTERFACE IMPORTED targets, but Qt Android deployment only
+# scans SHARED_LIBRARY targets. We manually add conan lib dirs so androiddeployqt finds them.
+if(ANDROID)
+    set_property(TARGET appvoice_command_test_app APPEND PROPERTY
+        _qt_android_extra_library_dirs
+        "${voice_command_LIB_DIRS_DEBUG}"
+        "${whisper-cpp_LIB_DIRS_DEBUG}"
+    )
+endif()
+
 include(GNUInstallDirs)
 install(TARGETS appvoice_command_test_app
     BUNDLE DESTINATION .
