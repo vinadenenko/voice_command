@@ -38,6 +38,8 @@ class VoiceCommandConan(ConanFile):
 
     def configure(self):
         self.options["whisper-cpp"].shared=True
+        if self.settings.os == "Android":
+            self.options["whisper-cpp"].with_vulkan=True
         if self.options.shared:
             self.options.rm_safe("fPIC")
 
@@ -48,7 +50,7 @@ class VoiceCommandConan(ConanFile):
         """Core dependencies for library"""
 
         # Whisper-cpp
-        self.requires("whisper-cpp/1.8.2")
+        self.requires("whisper-cpp/vulkan")
 
         # JSON parsing for configuration and data formats
         # self.requires("nlohmann_json/3.11.2")
