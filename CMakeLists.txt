@@ -146,15 +146,13 @@ if(VOICE_COMMAND_AUDIO_SDL)
     message(STATUS "audio_capture: SDL2_LIBRARIES = ${SDL2_LIBRARIES}")
 
     list(APPEND AUDIO_CAPTURE_SOURCES
-        sdl/sdl_audio_capture.cpp
+        ${CMAKE_SOURCE_DIR}/src/audio_capture/sdl/sdl_audio_capture.cpp
     )
     list(APPEND AUDIO_CAPTURE_HEADERS
         ${CMAKE_SOURCE_DIR}/include/audio_capture/sdl/sdl_audio_capture.h
     )
-    target_include_directories(voice_command PUBLIC ${SDL2_INCLUDE_DIRS})
     # target_link_libraries(voice_command PRIVATE ${SDL2_LIBRARIES})
     list(APPEND LIBS_TO_LINK ${SDL2_LIBRARIES})
-    target_compile_definitions(voice_command PUBLIC VOICE_COMMAND_AUDIO_SDL_ENABLED)
 endif()
 
 # Qt backend
@@ -181,6 +179,11 @@ add_library(voice_command SHARED
     ${VOICE_COMMAND_SOURCES} ${VOICE_COMMAND_HEADERS}
     ${AUDIO_CAPTURE_SOURCES} ${AUDIO_CAPTURE_HEADERS}
 )
+
+if(VOICE_COMMAND_AUDIO_SDL)
+    target_include_directories(voice_command PUBLIC ${SDL2_INCLUDE_DIRS})
+    target_compile_definitions(voice_command PUBLIC VOICE_COMMAND_AUDIO_SDL_ENABLED)
+endif()
 
 if(VOICE_COMMAND_AUDIO_QT)
     # Enable AUTOMOC for Qt's moc processing (required for Q_OBJECT in cpp files)
