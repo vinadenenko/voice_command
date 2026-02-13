@@ -1,15 +1,103 @@
 #include "whisper_engine.h"
 
 #include <whisper.h>
+#include <ggml.h>
+#include <ggml-backend.h>
 
 #include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <sstream>
 
+#include <QDebug>
+#include <QCoreApplication>
+#include <QDir>
+
+#include <dlfcn.h>
+
+#define MYTAG "my-tag:"
+
 namespace voice_command {
 
 namespace {
+
+/// Load GGML backends from application library path (needed for Android)
+void LoadGgmlBackends() {
+    // Get the application's library directory
+    QString appDir = QCoreApplication::applicationDirPath();
+    qDebug() << MYTAG << "App directory:" << appDir;
+
+    // On Android, libraries are in the same directory as the app
+    // Try to load backends from there
+    QByteArray pathBytes = appDir.toUtf8();
+    qDebug() << MYTAG << "Loading GGML backends from:" << pathBytes.constData();
+    ggml_backend_load_all_from_path(pathBytes.constData());
+
+    // Also try explicit loading of Vulkan backend
+    QString vulkanPath = appDir + "/libggml-vulkan.so";
+    QByteArray vulkanPathBytes = vulkanPath.toUtf8();
+    qDebug() << MYTAG << "Trying ggml_backend_load:" << vulkanPathBytes.constData();
+
+    ggml_backend_reg_t vulkan_reg = ggml_backend_load(vulkanPathBytes.constData());
+    if (vulkan_reg) {
+        qDebug() << MYTAG << "ggml_backend_load succeeded!";
+        qDebug() << MYTAG << "  Name:" << ggml_backend_reg_name(vulkan_reg);
+        qDebug() << MYTAG << "  Devices:" << ggml_backend_reg_dev_count(vulkan_reg);
+    } else {
+        qDebug() << MYTAG << "ggml_backend_load failed";
+    }
+
+    // Try direct dlopen to get actual error
+    qDebug() << MYTAG << "Trying direct dlopen:" << vulkanPathBytes.constData();
+    dlerror(); // Clear any existing error
+    void* handle = dlopen(vulkanPathBytes.constData(), RTLD_NOW);
+    if (handle) {
+        qDebug() << MYTAG << "dlopen succeeded!";
+
+        // Try to find the backend registration function
+        typedef ggml_backend_reg_t (*ggml_backend_reg_fn)(void);
+        ggml_backend_reg_fn reg_fn = (ggml_backend_reg_fn)dlsym(handle, "ggml_backend_vk_reg");
+        if (reg_fn) {
+            qDebug() << MYTAG << "Found ggml_backend_vk_reg symbol";
+            ggml_backend_reg_t reg = reg_fn();
+            if (reg) {
+                qDebug() << MYTAG << "ggml_backend_vk_reg() returned valid reg";
+                qDebug() << MYTAG << "  Devices:" << ggml_backend_reg_dev_count(reg);
+            } else {
+                qDebug() << MYTAG << "ggml_backend_vk_reg() returned NULL";
+            }
+        } else {
+            const char* sym_err = dlerror();
+            qDebug() << MYTAG << "dlsym failed:" << (sym_err ? sym_err : "unknown");
+        }
+    } else {
+        const char* err = dlerror();
+        qDebug() << MYTAG << "dlopen failed:" << (err ? err : "unknown error");
+    }
+}
+
+/// Debug function to check available GGML backends
+void CheckGgmlBackends() {
+    // First, try to load backends (especially important on Android)
+    LoadGgmlBackends();
+
+    size_t count = ggml_backend_reg_count();
+    qDebug() << MYTAG << "=== GGML Backend Check ===";
+    qDebug() << MYTAG << "Total backends:" << count;
+
+    for (size_t i = 0; i < count; i++) {
+        ggml_backend_reg_t reg = ggml_backend_reg_get(i);
+        const char* name = ggml_backend_reg_name(reg);
+        size_t dev_count = ggml_backend_reg_dev_count(reg);
+        qDebug() << MYTAG << "Backend" << i << ":" << name << "- devices:" << dev_count;
+
+        for (size_t j = 0; j < dev_count; j++) {
+            ggml_backend_dev_t dev = ggml_backend_reg_dev_get(reg, j);
+            qDebug() << MYTAG << "  Device" << j << ":" << ggml_backend_dev_name(dev);
+        }
+    }
+    qDebug() << MYTAG << "=========================";
+}
 
 /// Trim whitespace from both ends of a string
 std::string Trim(const std::string& str) {
@@ -60,6 +148,9 @@ bool WhisperEngine::Init(const WhisperEngineConfig& config) {
     }
 
     config_ = config;
+
+    // Debug: Check available backends before initialization
+    CheckGgmlBackends();
 
     // Create context parameters
     whisper_context_params cparams = whisper_context_default_params();
