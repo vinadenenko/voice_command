@@ -175,3 +175,8 @@ Desktop Linux Vulkan Build - What comes from where:
 
   The Conan package handles the runtime library and headers, but glslc must be installed locally because it's a
   build-time tool that compiles GLSL shaders to SPIR-V.
+  
+
+1. Add signals to be able to show UI with progress bar about 'inference process'
+2. Add ability to set 'wake word'
+3. Add ability to convinience send request to whisper cpp deployed on server + nlu with llama deployed on server
