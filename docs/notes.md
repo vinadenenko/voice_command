@@ -152,3 +152,26 @@ Recommendations
   - Single callback handles everything in user's context
   - No awkward dependency injection
   - Cleaner separation: library recognizes, user acts
+  
+
+
+
+## About Vulkan
+
+Desktop Linux Vulkan Build - What comes from where:                                                             
+  ┌───────────────────────┬──────────────────────────────────────────┬───────────────────────────────────┐
+  │       Component       │                  Source                  │               Notes               │        
+  ├───────────────────────┼──────────────────────────────────────────┼───────────────────────────────────┤
+  │ libvulkan.so (loader) │ Conan (vulkan-loader/1.3.290.0)          │ Runtime library                   │
+  ├───────────────────────┼──────────────────────────────────────────┼───────────────────────────────────┤
+  │ vulkan.h, vulkan.hpp  │ Conan (vulkan-headers via vulkan-loader) │ C/C++ headers                     │
+  ├───────────────────────┼──────────────────────────────────────────┼───────────────────────────────────┤        
+  │ glslc                 │ Local system                             │ Shader compiler (build-time only) │        
+  └───────────────────────┴──────────────────────────────────────────┴───────────────────────────────────┘
+  For other users, they need:
+  # Install glslc (shader compiler) - required for building
+  sudo apt install glslc
+  # OR install full Vulkan SDK from LunarG
+
+  The Conan package handles the runtime library and headers, but glslc must be installed locally because it's a
+  build-time tool that compiles GLSL shaders to SPIR-V.
