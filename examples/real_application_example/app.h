@@ -15,6 +15,7 @@ class App : public QObject
 
 public:
     explicit App(QObject *parent = nullptr);
+    ~App() override;
 
     bool isRecording() const;
     bool isProcessing() const;

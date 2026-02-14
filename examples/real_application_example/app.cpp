@@ -12,6 +12,11 @@ App::App(QObject *parent)
     initVoiceAssistant();
 }
 
+App::~App()
+{
+    delete assistant_;
+}
+
 bool App::isRecording() const
 {
     return isRecording_;
