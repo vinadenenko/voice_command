@@ -27,7 +27,7 @@ class VoiceCommandConan(ConanFile):
         "shared": True,
         "fPIC": True,
         "with_tests": False,
-        "with_examples": False
+        "with_examples": False,
         "with_vulkan": False
     }
 
