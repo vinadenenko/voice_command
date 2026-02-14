@@ -180,3 +180,9 @@ Desktop Linux Vulkan Build - What comes from where:
 1. Add signals to be able to show UI with progress bar about 'inference process'
 2. Add ability to set 'wake word'
 3. Add ability to convinience send request to whisper cpp deployed on server + nlu with llama deployed on server
+---
+Find out why whisper-stream example works literally within 1 second and command takes 10 seconds.
+Since we need only inference to get string with words with confidence, we can use the same approach as whisper-stream. Check the diff.
+Answer: 
+1. setting audio_ctx to match actual audio length provides ~10x encoder speedup (10s → 1s for tiny model on CPU)
+2. Need to check GREEDY whisper mode or lower beam_size + best on one (not 5)
