@@ -11,10 +11,13 @@ class App : public QObject
     Q_OBJECT
     QML_ELEMENT
     Q_PROPERTY(bool isRecording READ isRecording NOTIFY isRecordingChanged)
+    Q_PROPERTY(bool isProcessing READ isProcessing NOTIFY isProcessingChanged)
+
 public:
     explicit App(QObject *parent = nullptr);
 
     bool isRecording() const;
+    bool isProcessing() const;
 
 public slots:
     void onButtonPressed();
@@ -22,15 +25,16 @@ public slots:
 
 signals:
     void isRecordingChanged();
-
-
-signals:
+    void isProcessingChanged();
     void requestChangeColor(const QColor &color);
+
 private:
     void initVoiceAssistant();
-private:
+    void setProcessing(bool processing);
+
     voice_command::QtVoiceAssistant *assistant_;
     bool isRecording_{false};
+    bool isProcessing_{false};
 };
 
 #endif // APP_H

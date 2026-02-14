@@ -17,6 +17,19 @@ bool App::isRecording() const
     return isRecording_;
 }
 
+bool App::isProcessing() const
+{
+    return isProcessing_;
+}
+
+void App::setProcessing(bool processing)
+{
+    if (isProcessing_ != processing) {
+        isProcessing_ = processing;
+        emit isProcessingChanged();
+    }
+}
+
 void App::onButtonPressed()
 {
     if (!isRecording_) {
@@ -41,7 +54,7 @@ void App::onButtonReleased()
 
 struct AppConfig {
     std::string model_path = "models/ggml-tiny.en.bin";
-    int num_threads = 4;
+    int num_threads = 10;
     bool use_gpu = true;
     int capture_device_id = -1;
 };
@@ -221,6 +234,10 @@ void App::initVoiceAssistant()
     fprintf(stderr, "\n");
 
     // Connect to signals
+    connect(assistant_, &voice_command::QtVoiceAssistant::captureEnded, this, [this]() {
+        setProcessing(true);
+    });
+
     connect(assistant_, &voice_command::QtVoiceAssistant::speechDetected, this, []() {
         qDebug() << "Speech detected, processing";
     });
@@ -228,6 +245,7 @@ void App::initVoiceAssistant()
     connect(assistant_, &voice_command::QtVoiceAssistant::commandExecuted, this,
         [this](const std::string& command_name, voice_command::CommandResult result,
                const voice_command::CommandContext& context) {
+            setProcessing(false);
             const char* result_str = "unknown";
             switch (result) {
             case voice_command::CommandResult::kSuccess:
@@ -251,12 +269,14 @@ void App::initVoiceAssistant()
         });
 
     connect(assistant_, &voice_command::QtVoiceAssistant::unrecognizedSpeech, this,
-        [](const std::string& transcript) {
+        [this](const std::string& transcript) {
+            setProcessing(false);
             fprintf(stdout, "[Unrecognized: '%s']\n", transcript.c_str());
         });
 
     connect(assistant_, &voice_command::QtVoiceAssistant::errorOccurred, this,
-        [](const std::string& error) {
+        [this](const std::string& error) {
+            setProcessing(false);
             fprintf(stderr, "[Error: %s]\n", error.c_str());
         });
 
