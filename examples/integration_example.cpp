@@ -334,12 +334,12 @@ int main(int argc, char** argv) {
     RegisterCommands(assistant.GetRegistry());
     fprintf(stderr, "\n");
 
-    // Set up callbacks
-    assistant.SetSpeechDetectedCallback([]() {
+    // Connect to signals
+    QObject::connect(&assistant, &voice_command::QtVoiceAssistant::speechDetected, []() {
         qDebug() << "Speech detected, processing";
     });
 
-    assistant.SetCommandCallback(
+    QObject::connect(&assistant, &voice_command::QtVoiceAssistant::commandExecuted,
         [](const std::string& command_name, voice_command::CommandResult result,
            const voice_command::CommandContext& /*context*/) {
             const char* result_str = "unknown";
@@ -360,13 +360,15 @@ int main(int argc, char** argv) {
             qDebug() << QString("[Command '%1' executed: %2]").arg(command_name.c_str(), result_str);
         });
 
-    assistant.SetUnrecognizedCallback([](const std::string& transcript) {
-        fprintf(stdout, "[Unrecognized: '%s']\n", transcript.c_str());
-    });
+    QObject::connect(&assistant, &voice_command::QtVoiceAssistant::unrecognizedSpeech,
+        [](const std::string& transcript) {
+            fprintf(stdout, "[Unrecognized: '%s']\n", transcript.c_str());
+        });
 
-    assistant.SetErrorCallback([](const std::string& error) {
-        fprintf(stderr, "[Error: %s]\n", error.c_str());
-    });
+    QObject::connect(&assistant, &voice_command::QtVoiceAssistant::errorOccurred,
+        [](const std::string& error) {
+            fprintf(stderr, "[Error: %s]\n", error.c_str());
+        });
 
     // Start processing
     fprintf(stderr, "Starting voice command processing...\n");

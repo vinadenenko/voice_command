@@ -20,11 +20,14 @@ Window {
     }
 
     Button {
-        text: "Test commands"
-        onClicked: {
-            app.test()
+            // text: "Push to Talk"
+            // anchors.centerIn: parent
+            onPressed: app.onButtonPressed()
+            onReleased: app.onButtonReleased()
+
+            // Optional: Change button text when it's pressed
+            text: app.isRecording ? "Release to Stop" : "Press and hold to talk"
         }
-    }
 
     Rectangle {
         id: rec

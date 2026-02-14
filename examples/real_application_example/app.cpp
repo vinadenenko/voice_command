@@ -8,7 +8,36 @@
 
 App::App(QObject *parent)
     : QObject{parent}
-{}
+{
+    initVoiceAssistant();
+}
+
+bool App::isRecording() const
+{
+    return isRecording_;
+}
+
+void App::onButtonPressed()
+{
+    if (!isRecording_) {
+        isRecording_ = true;
+        emit isRecordingChanged();
+        // Start recording or communication logic
+        qDebug() << "Recording started...";
+        assistant_->startCapture();
+    }
+}
+
+void App::onButtonReleased()
+{
+    if (isRecording_) {
+        isRecording_ = false;
+        emit isRecordingChanged();
+        // Stop recording or communication logic
+        qDebug() << "Recording stopped.";
+        assistant_->stopCapture();
+    }
+}
 
 struct AppConfig {
     std::string model_path = "models/ggml-tiny.en.bin";
@@ -139,9 +168,10 @@ void RegisterCommands(voice_command::CommandRegistry* registry) {
         fprintf(stderr, "  Registered: %s (parameterized)\n", desc.name.c_str());
     }
 }
-void App::test()
+
+void App::initVoiceAssistant()
 {
-     AppConfig app_config;
+    AppConfig app_config;
     // Configure audio engine (Qt backend)
     voice_command::audio_capture::AudioCaptureConfig audio_capture_config;
     audio_capture_config.device_id = app_config.capture_device_id;
@@ -151,7 +181,7 @@ void App::test()
 
     voice_command::audio_capture::VadConfig vad_config;
     vad_config.window_ms = 1000;
-    vad_config.energy_threshold = 0.1f;
+    vad_config.energy_threshold = 0.5f;
     vad_config.freq_threshold = 100.0f;
     vad_config.sample_rate = 16000;
 
@@ -171,12 +201,14 @@ void App::test()
     config.poll_interval_ms = 100;
     config.auto_select_strategy = true;
 
+    config.listening_mode = voice_command::ListeningMode::kPushToTalk;
+
     // Create NLU engine
     auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
 
     // // Create voice assistant
-    voice_command::QtVoiceAssistant *assistant = new voice_command::QtVoiceAssistant;
-    if (!assistant->Init(config, std::move(nlu_engine))) {
+    assistant_ = new voice_command::QtVoiceAssistant;
+    if (!assistant_->Init(config, std::move(nlu_engine))) {
         fprintf(stderr, "Failed to initialize voice assistant!\n");
         fprintf(stderr, "Make sure the model file exists: %s\n",
                 app_config.model_path.c_str());
@@ -185,23 +217,22 @@ void App::test()
 
     // Register commands
     fprintf(stderr, "Registering commands:\n");
-    RegisterCommands(assistant->GetRegistry());
+    RegisterCommands(assistant_->GetRegistry());
     fprintf(stderr, "\n");
 
-    // Set up callbacks
-    assistant->SetSpeechDetectedCallback([]() {
+    // Connect to signals
+    connect(assistant_, &voice_command::QtVoiceAssistant::speechDetected, this, []() {
         qDebug() << "Speech detected, processing";
     });
 
-    assistant->SetCommandCallback(
+    connect(assistant_, &voice_command::QtVoiceAssistant::commandExecuted, this,
         [this](const std::string& command_name, voice_command::CommandResult result,
-           const voice_command::CommandContext& context) {
+               const voice_command::CommandContext& context) {
             const char* result_str = "unknown";
             switch (result) {
             case voice_command::CommandResult::kSuccess:
                 if (command_name == "change_color") {
                     QString color = QString::fromStdString(context.GetParam("color").AsString());
-                    // qDebug() << "ACtion to" << color << ;
                     emit requestChangeColor(QColor(color));
                 }
                 result_str = "success";
@@ -219,12 +250,16 @@ void App::test()
             qDebug() << QString("[Command '%1' executed: %2]").arg(command_name.c_str(), result_str);
         });
 
-    assistant->SetUnrecognizedCallback([](const std::string& transcript) {
-        fprintf(stdout, "[Unrecognized: '%s']\n", transcript.c_str());
-    });
+    connect(assistant_, &voice_command::QtVoiceAssistant::unrecognizedSpeech, this,
+        [](const std::string& transcript) {
+            fprintf(stdout, "[Unrecognized: '%s']\n", transcript.c_str());
+        });
 
-    assistant->SetErrorCallback([](const std::string& error) {
-        fprintf(stderr, "[Error: %s]\n", error.c_str());
-    });
-    assistant->Start();
+    connect(assistant_, &voice_command::QtVoiceAssistant::errorOccurred, this,
+        [](const std::string& error) {
+            fprintf(stderr, "[Error: %s]\n", error.c_str());
+        });
+
+    qDebug() << "[Debug] beam_size:" << config.whisper_config.beam_size;
+    assistant_->Start();
 }

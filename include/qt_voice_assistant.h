@@ -14,8 +14,8 @@
 #include <thread>
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
-#include <functional>
 #include <memory>
 #include <mutex>
 #include <queue>
@@ -29,6 +29,21 @@
 #include "whisper_engine.h"
 
 namespace voice_command {
+
+/// Listening mode for voice command activation
+enum class ListeningMode {
+    kContinuous,   ///< VAD-based, always listening (default, current behavior)
+    kWakeWord,     ///< Listen for wake phrase, then capture command
+    kPushToTalk    ///< Only capture while StartCapture()/StopCapture() active
+};
+
+/// Internal state for listening state machine
+enum class ListeningState {
+    kIdle,           ///< PTT: waiting for trigger
+    kListening,      ///< Continuous/WakeWord: listening for speech
+    kWakeWordActive, ///< WakeWord: wake detected, listening for command
+    kCapturing       ///< PTT: actively capturing
+};
 
 /// Configuration for QtVoiceAssistant
 struct QtVoiceAssistantConfig {
@@ -56,15 +71,19 @@ struct QtVoiceAssistantConfig {
 
     /// Force NLU strategy even for simple commands
     bool force_nlu_strategy = false;
-};
 
-/// Callback types for QtVoiceAssistant events
-using QtCommandCallback = std::function<void(const std::string& command_name,
-                                            CommandResult result,
-                                            const CommandContext& context)>;
-using QtErrorCallback = std::function<void(const std::string& error)>;
-using QtUnrecognizedCallback = std::function<void(const std::string& transcript)>;
-using QtSpeechDetectedCallback = std::function<void()>;
+    /// Listening mode (continuous/wake-word/push-to-talk)
+    ListeningMode listening_mode = ListeningMode::kContinuous;
+
+    /// Wake word phrase (required if listening_mode == kWakeWord)
+    std::string wake_word;
+
+    /// Timeout (ms) to wait for command after wake word detected
+    int wake_word_timeout_ms = 5000;
+
+    /// Minimum confidence for wake word detection (0.0-1.0)
+    float wake_word_confidence = 0.5f;
+};
 
 /// QtVoiceAssistant uses QTimer for audio capture instead of std::thread
 ///
@@ -78,7 +97,7 @@ using QtSpeechDetectedCallback = std::function<void()>;
 ///
 /// Thread Safety:
 /// - All public methods are thread-safe
-/// - Callbacks are invoked from the processing thread
+/// - Signals are emitted from the processing thread
 /// - Must be created and used within a QCoreApplication/QApplication
 class QtVoiceAssistant : public QObject {
     Q_OBJECT
@@ -128,21 +147,25 @@ public:
     /// @return Const pointer to registry
     const CommandRegistry* GetRegistry() const;
 
-    /// Set callback for command execution events
-    /// @param callback Function called after command dispatch
-    void SetCommandCallback(QtCommandCallback callback);
+    /// Begin push-to-talk capture (kPushToTalk mode only)
+    /// @return true if capture started successfully
+    Q_INVOKABLE bool startCapture();
 
-    /// Set callback for errors
-    /// @param callback Function called on errors
-    void SetErrorCallback(QtErrorCallback callback);
+    /// End push-to-talk capture and queue for processing
+    /// @return true if capture ended successfully
+    Q_INVOKABLE bool stopCapture();
 
-    /// Set callback for unrecognized speech
-    /// @param callback Function called when speech doesn't match commands
-    void SetUnrecognizedCallback(QtUnrecognizedCallback callback);
+    /// Check if currently capturing (PTT mode)
+    /// @return true if in kCapturing state
+    bool IsCapturing() const;
 
-    /// Set callback for speech detection
-    /// @param callback Function called when speech is detected
-    void SetSpeechDetectedCallback(QtSpeechDetectedCallback callback);
+    /// Get current listening mode
+    /// @return Current listening mode
+    ListeningMode GetListeningMode() const;
+
+    /// Get current listening state
+    /// @return Current listening state
+    ListeningState GetListeningState() const;
 
     /// Force a specific recognition strategy
     /// @param use_nlu If true, use NLU strategy; if false, use guided
@@ -151,6 +174,33 @@ public:
     /// Get current configuration
     /// @return Reference to configuration
     const QtVoiceAssistantConfig& GetConfig() const;
+
+signals:
+    /// Emitted when wake word is detected (kWakeWord mode)
+    void wakeWordDetected();
+
+    /// Emitted when PTT capture starts
+    void captureStarted();
+
+    /// Emitted when PTT capture ends
+    void captureEnded();
+
+    /// Emitted when listening state changes
+    void listeningStateChanged(ListeningState oldState, ListeningState newState);
+
+    /// Emitted after a command is executed
+    void commandExecuted(const std::string& command_name,
+                         CommandResult result,
+                         const CommandContext& context);
+
+    /// Emitted when an error occurs
+    void errorOccurred(const std::string& error);
+
+    /// Emitted when speech is detected but doesn't match any command
+    void unrecognizedSpeech(const std::string& transcript);
+
+    /// Emitted when speech is detected (before recognition)
+    void speechDetected();
 
 private slots:
     /// Called by QTimer to poll audio (runs on main thread)
@@ -164,6 +214,7 @@ private:
     void SelectStrategy();
 
     /// Process a single audio buffer
+    /// @param samples Audio samples to process
     void ProcessAudio(const audio_capture::AudioSamples& samples);
 
     // Configuration
@@ -192,12 +243,21 @@ private:
     std::mutex queue_mutex_;
     std::condition_variable queue_cv_;
 
-    // Callbacks
-    QtCommandCallback command_callback_;
-    QtErrorCallback error_callback_;
-    QtUnrecognizedCallback unrecognized_callback_;
-    QtSpeechDetectedCallback speech_detected_callback_;
-    std::mutex callback_mutex_;
+    // Listening state machine
+    std::atomic<ListeningState> listening_state_{ListeningState::kIdle};
+    std::chrono::steady_clock::time_point capture_start_time_;
+    std::chrono::steady_clock::time_point wake_timeout_start_;
+
+    /// Transition listening state with signal notification
+    void SetListeningState(ListeningState new_state);
+
+    /// Mode-specific timer handlers
+    void OnAudioTimer_Continuous();
+    void OnAudioTimer_WakeWord();
+    void OnAudioTimer_PushToTalk();
+
+    /// Queue audio for processing
+    void QueueAudio(audio_capture::AudioSamples samples);
 };
 
 }  // namespace voice_command
