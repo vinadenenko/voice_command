@@ -20,13 +20,15 @@ class VoiceCommandConan(ConanFile):
         "shared": [True, False],
         "fPIC": [True, False],
         "with_tests": [True, False],
-        "with_examples": [True, False]
+        "with_examples": [True, False],
+        "with_vulkan": [True, False]
     }
     default_options = {
         "shared": True,
         "fPIC": True,
         "with_tests": False,
         "with_examples": False
+        "with_vulkan": False
     }
 
     # Export sources for conan center
@@ -38,6 +40,9 @@ class VoiceCommandConan(ConanFile):
 
     def configure(self):
         self.options["whisper-cpp"].shared=True
+        # if self.settings.os == "Android":
+        if self.options.with_vulkan:
+            self.options["whisper-cpp"].with_vulkan=True
         if self.options.shared:
             self.options.rm_safe("fPIC")
 
@@ -48,7 +53,7 @@ class VoiceCommandConan(ConanFile):
         """Core dependencies for library"""
 
         # Whisper-cpp
-        self.requires("whisper-cpp/1.8.2")
+        self.requires("whisper-cpp/vulkan")
 
         # JSON parsing for configuration and data formats
         # self.requires("nlohmann_json/3.11.2")
@@ -118,3 +123,20 @@ class VoiceCommandConan(ConanFile):
         # Build type specific flags
         if self.settings.build_type == "Debug":
             self.cpp_info.defines.append("VOICE_COMMAND_DEBUG")
+
+        # Android Vulkan: propagate linker flags to consumers
+        # This allows consumers to link against system Vulkan without bundling the stub
+        # Note: Vulkan is always enabled for Android builds (see configure())
+        if self.settings.os == "Android" and self.options.with_vulkan:
+            ndk_path = self.conf.get("tools.android:ndk_path")
+            if ndk_path:
+                arch_map = {
+                    "armv8": "aarch64-linux-android",
+                    "armv7": "arm-linux-androideabi",
+                    "x86": "i686-linux-android",
+                    "x86_64": "x86_64-linux-android",
+                }
+                android_abi = arch_map.get(str(self.settings.arch), "aarch64-linux-android")
+                vulkan_lib_dir = os.path.join(ndk_path, "toolchains", "llvm", "prebuilt", "linux-x86_64", "sysroot", "usr", "lib", android_abi, "29")
+                self.cpp_info.sharedlinkflags.append(f"-L{vulkan_lib_dir}")
+                self.cpp_info.exelinkflags.append(f"-L{vulkan_lib_dir}")

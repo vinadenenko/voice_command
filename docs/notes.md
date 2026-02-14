@@ -152,3 +152,37 @@ Recommendations
   - Single callback handles everything in user's context
   - No awkward dependency injection
   - Cleaner separation: library recognizes, user acts
+  
+
+
+
+## About Vulkan
+
+Desktop Linux Vulkan Build - What comes from where:                                                             
+  ┌───────────────────────┬──────────────────────────────────────────┬───────────────────────────────────┐
+  │       Component       │                  Source                  │               Notes               │        
+  ├───────────────────────┼──────────────────────────────────────────┼───────────────────────────────────┤
+  │ libvulkan.so (loader) │ Conan (vulkan-loader/1.3.290.0)          │ Runtime library                   │
+  ├───────────────────────┼──────────────────────────────────────────┼───────────────────────────────────┤
+  │ vulkan.h, vulkan.hpp  │ Conan (vulkan-headers via vulkan-loader) │ C/C++ headers                     │
+  ├───────────────────────┼──────────────────────────────────────────┼───────────────────────────────────┤        
+  │ glslc                 │ Local system                             │ Shader compiler (build-time only) │        
+  └───────────────────────┴──────────────────────────────────────────┴───────────────────────────────────┘
+  For other users, they need:
+  # Install glslc (shader compiler) - required for building
+  sudo apt install glslc
+  # OR install full Vulkan SDK from LunarG
+
+  The Conan package handles the runtime library and headers, but glslc must be installed locally because it's a
+  build-time tool that compiles GLSL shaders to SPIR-V.
+  
+
+1. Add signals to be able to show UI with progress bar about 'inference process'
+2. Add ability to set 'wake word'
+3. Add ability to convinience send request to whisper cpp deployed on server + nlu with llama deployed on server
+---
+Find out why whisper-stream example works literally within 1 second and command takes 10 seconds.
+Since we need only inference to get string with words with confidence, we can use the same approach as whisper-stream. Check the diff.
+Answer: 
+1. setting audio_ctx to match actual audio length provides ~10x encoder speedup (10s → 1s for tiny model on CPU)
+2. Need to check GREEDY whisper mode or lower beam_size + best on one (not 5)
