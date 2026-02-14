@@ -20,13 +20,15 @@ class VoiceCommandConan(ConanFile):
         "shared": [True, False],
         "fPIC": [True, False],
         "with_tests": [True, False],
-        "with_examples": [True, False]
+        "with_examples": [True, False],
+        "with_vulkan": [True, False]
     }
     default_options = {
         "shared": True,
         "fPIC": True,
         "with_tests": False,
         "with_examples": False
+        "with_vulkan": False
     }
 
     # Export sources for conan center
@@ -39,7 +41,8 @@ class VoiceCommandConan(ConanFile):
     def configure(self):
         self.options["whisper-cpp"].shared=True
         # if self.settings.os == "Android":
-        self.options["whisper-cpp"].with_vulkan=True
+        if self.options.with_vulkan:
+            self.options["whisper-cpp"].with_vulkan=True
         if self.options.shared:
             self.options.rm_safe("fPIC")
 
@@ -124,7 +127,7 @@ class VoiceCommandConan(ConanFile):
         # Android Vulkan: propagate linker flags to consumers
         # This allows consumers to link against system Vulkan without bundling the stub
         # Note: Vulkan is always enabled for Android builds (see configure())
-        if self.settings.os == "Android":
+        if self.settings.os == "Android" and self.options.with_vulkan:
             ndk_path = self.conf.get("tools.android:ndk_path")
             if ndk_path:
                 arch_map = {
