@@ -13,14 +13,16 @@
 #include <QCoreApplication>
 #include <QDir>
 
+#if defined(__unix__)
 #include <dlfcn.h>
+#endif
 
 #define MYTAG "my-tag:"
 
 namespace voice_command {
 
 namespace {
-
+#if defined(__unix__)
 /// Load GGML backends from application library path (needed for Android)
 void LoadGgmlBackends() {
     // Get the application's library directory
@@ -98,6 +100,7 @@ void CheckGgmlBackends() {
     }
     qDebug() << MYTAG << "=========================";
 }
+#endif
 
 /// Trim whitespace from both ends of a string
 std::string Trim(const std::string& str) {
@@ -149,8 +152,10 @@ bool LocalWhisperEngine::Init(const LocalWhisperEngineConfig& config) {
 
     config_ = config;
 
+    #if defined(__unix__)
     // Debug: Check available backends before initialization
     CheckGgmlBackends();
+    #endif
 
     // Create context parameters
     whisper_context_params cparams = whisper_context_default_params();
