@@ -243,10 +243,13 @@ void App::initVoiceAssistant()
     config.listening_mode = voice_command::ListeningMode::kPushToTalk;
 
     // Create NLU engine
-    // auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
-    voice_command::RemoteLlmNluConfig remoteLlmNluConfig;
-    remoteLlmNluConfig.server_url = "http://192.168.56.1:1234";
-    auto nlu_engine = std::make_unique<voice_command::RemoteLlmNluEngine>(remoteLlmNluConfig);
+    auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
+
+    // Example of remote llm nlu engine
+    // voice_command::RemoteLlmNluConfig remoteLlmNluConfig;
+    // remoteLlmNluConfig.server_url = "http://192.168.56.1:1234";
+    // remoteLlmNluConfig.model = "gemma-2-2b-instruct-structured-output";
+    // auto nlu_engine = std::make_unique<voice_command::RemoteLlmNluEngine>(remoteLlmNluConfig);
 
     // Create voice assistant (pass ASR engine via dependency injection)
     assistant_ = new voice_command::QtVoiceAssistant;
