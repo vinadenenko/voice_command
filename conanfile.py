@@ -55,11 +55,11 @@ class VoiceCommandConan(ConanFile):
         # Whisper-cpp
         self.requires("whisper-cpp/vulkan")
 
-        # JSON parsing for configuration and data formats
-        # self.requires("nlohmann_json/3.11.2")
+        # HTTP client for remote ASR/NLU backends
+        self.requires("cpp-httplib/0.18.1")
 
-        # Logging framework
-        # self.requires("spdlog/1.13.0")
+        # JSON parsing for remote API responses
+        self.requires("nlohmann_json/3.11.3")
 
         # Testing framework (when tests are enabled)
         if self.options.with_tests:
