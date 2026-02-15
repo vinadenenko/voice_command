@@ -74,6 +74,7 @@ set(VOICE_COMMAND_SOURCES
     src/command/registry/commandregistry.cpp
     src/command/nlu/llm_nlu_engine.cpp
     src/command/nlu/rule_based_nlu_engine.cpp
+    src/command/nlu/remote_llm_nlu_engine.cpp
     # Testing utilities
     src/testing/command_tester.cpp
     # Engine wrappers
@@ -99,6 +100,7 @@ set(VOICE_COMMAND_HEADERS
     include/command/nlu/inlu_engine.h
     include/command/nlu/llm_nlu_engine.h
     include/command/nlu/rule_based_nlu_engine.h
+    include/command/nlu/remote_llm_nlu_engine.h
     # Testing utilities
     include/testing/command_tester.h
     # Engine wrappers

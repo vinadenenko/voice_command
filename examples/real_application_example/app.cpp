@@ -5,6 +5,7 @@
 #include "audio_engine.h"
 #include "qt_voice_assistant.h"
 #include "command/nlu/rule_based_nlu_engine.h"
+#include "command/nlu/remote_llm_nlu_engine.h"
 
 App::App(QObject *parent)
     : QObject{parent}
@@ -242,7 +243,10 @@ void App::initVoiceAssistant()
     config.listening_mode = voice_command::ListeningMode::kPushToTalk;
 
     // Create NLU engine
-    auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
+    // auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
+    voice_command::RemoteLlmNluConfig remoteLlmNluConfig;
+    remoteLlmNluConfig.server_url = "http://192.168.56.1:1234";
+    auto nlu_engine = std::make_unique<voice_command::RemoteLlmNluEngine>(remoteLlmNluConfig);
 
     // Create voice assistant (pass ASR engine via dependency injection)
     assistant_ = new voice_command::QtVoiceAssistant;
