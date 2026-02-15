@@ -3,6 +3,7 @@
 #include <httplib.h>
 #include <nlohmann/json.hpp>
 
+#include <iostream>
 #include <sstream>
 
 namespace voice_command {
@@ -107,6 +108,13 @@ NluResult RemoteLlmNluEngine::Process(
         headers.emplace("Authorization", "Bearer " + config_.api_key);
     }
 
+    // Debug: Print request
+    if (config_.enable_debug_logging) {
+        std::cout << "========= LLM Request Start =========" << std::endl;
+        std::cout << "[RemoteLLM] Request JSON:\n" << request_body.dump(2) << std::endl;
+        std::cout << "========= LLM Request End =========" << std::endl;
+    }
+
     // Send request
     auto response = client->Post(config_.endpoint, headers,
                                  request_body.dump(), "application/json");
@@ -124,9 +132,31 @@ NluResult RemoteLlmNluEngine::Process(
         return result;
     }
 
+    // Debug: Print raw response
+    if (config_.enable_debug_logging) {
+        std::cout << "========= LLM Response Start =========" << std::endl;
+        std::cout << "[RemoteLLM] Response Status: " << response->status << std::endl;
+        std::cout << "[RemoteLLM] Response Body:\n" << response->body << std::endl;
+    }
+
     // Parse response
     try {
         auto response_json = nlohmann::json::parse(response->body);
+
+        // Debug: Print token usage if available
+        if (config_.enable_debug_logging && response_json.contains("usage")) {
+            auto& usage = response_json["usage"];
+            std::cout << "[RemoteLLM] Token Usage:" << std::endl;
+            if (usage.contains("prompt_tokens")) {
+                std::cout << "  Input tokens:  " << usage["prompt_tokens"] << std::endl;
+            }
+            if (usage.contains("completion_tokens")) {
+                std::cout << "  Output tokens: " << usage["completion_tokens"] << std::endl;
+            }
+            if (usage.contains("total_tokens")) {
+                std::cout << "  Total tokens:  " << usage["total_tokens"] << std::endl;
+            }
+        }
 
         // OpenAI format: choices[0].message.content
         if (!response_json.contains("choices") ||
@@ -145,6 +175,11 @@ NluResult RemoteLlmNluEngine::Process(
         }
 
         std::string content = choice["message"]["content"];
+        
+        if (config_.enable_debug_logging) {
+            std::cout << "========= LLM Response End =========" << std::endl;
+        }
+        
         return ParseLlmContent(content);
 
     } catch (const nlohmann::json::exception& e) {

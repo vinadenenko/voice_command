@@ -28,6 +28,7 @@
 #include "command/context/commandcontext.h"
 #include "command/descriptor/commanddescriptor.h"
 #include "command/icommand.h"
+#include "command/nlu/remote_llm_nlu_engine.h"
 #include "command/nlu/rule_based_nlu_engine.h"
 #include "voice_assistant.h"
 
@@ -328,6 +329,11 @@ int main(int argc, char** argv) {
 
     // Create NLU engine
     auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
+    // Example of remote llm nlu engine
+    // voice_command::RemoteLlmNluConfig remoteLlmNluConfig;
+    // remoteLlmNluConfig.server_url = "http://192.168.56.1:1234";
+    // remoteLlmNluConfig.model = "gemma-2-2b-instruct-structured-output";
+    // auto nlu_engine = std::make_unique<voice_command::RemoteLlmNluEngine>(remoteLlmNluConfig);
 
     // Create voice assistant (pass ASR engine via dependency injection)
     voice_command::QtVoiceAssistant assistant;

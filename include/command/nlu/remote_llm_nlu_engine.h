@@ -30,6 +30,9 @@ struct RemoteLlmNluConfig {
 
     /// Maximum tokens in response
     int max_tokens = 256;
+
+    /// Enable debug logging of LLM requests/responses
+    bool enable_debug_logging = false;
 };
 
 /// RemoteLlmNluEngine sends transcripts to a remote LLM for intent classification.
