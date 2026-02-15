@@ -182,6 +182,12 @@ add_library(voice_command SHARED
     ${AUDIO_CAPTURE_SOURCES} ${AUDIO_CAPTURE_HEADERS}
 )
 
+if(WIN32)
+set_target_properties(voice_command PROPERTIES
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+endif()
+
 if(VOICE_COMMAND_AUDIO_SDL)
     target_include_directories(voice_command PUBLIC ${SDL2_INCLUDE_DIRS})
     target_compile_definitions(voice_command PUBLIC VOICE_COMMAND_AUDIO_SDL_ENABLED)

@@ -13,6 +13,13 @@
 #include <QTimer>
 #include <thread>
 
+// Export macro for Windows DLL
+#ifdef VOICE_COMMAND_BUILDING
+#define VOICE_COMMAND_API Q_DECL_EXPORT
+#else
+#define VOICE_COMMAND_API Q_DECL_IMPORT
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -99,7 +106,7 @@ struct QtVoiceAssistantConfig {
 /// - All public methods are thread-safe
 /// - Signals are emitted from the processing thread
 /// - Must be created and used within a QCoreApplication/QApplication
-class QtVoiceAssistant : public QObject {
+class VOICE_COMMAND_API QtVoiceAssistant : public QObject {
     Q_OBJECT
 
 public:
