@@ -78,6 +78,7 @@ class VoiceCommandConan(ConanFile):
         tc = CMakeToolchain(self)
         #tc.variables["VoiceCommand_BUILD_TESTS"] = self.options.with_tests
         #tc.variables["VoiceCommand_BUILD_EXAMPLES"] = self.options.with_examples
+        # tc.variables["Qt6_DIR"] = "F:/dev/programs/Qt/6.6.3/msvc2019_64/lib/cmake/Qt6"
         tc.variables["Qt6_DIR"] = "/home/user/Qt/6.6.3/gcc_64/lib/cmake/Qt6"
         if self.settings.os == "Android":
             # Android specific configuration
