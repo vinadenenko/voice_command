@@ -186,3 +186,9 @@ Since we need only inference to get string with words with confidence, we can us
 Answer: 
 1. setting audio_ctx to match actual audio length provides ~10x encoder speedup (10s → 1s for tiny model on CPU)
 2. Need to check GREEDY whisper mode or lower beam_size + best on one (not 5)
+
+
+
+----
+To run whisper server: 
+./build/bin/whisper-server -m ./models/ggml-tiny.en.bin -t 10 -d 3000 -debug -pc -pr -pp

@@ -50,8 +50,8 @@ option(VOICE_COMMAND_BUILD_EXAMPLES "Build examples" OFF)
 find_package(Qt6 REQUIRED COMPONENTS Core Multimedia)
 # Find required packages
 find_package(whisper-cpp REQUIRED)
-# find_package(nlohmann_json REQUIRED)
-# find_package(spdlog REQUIRED)
+find_package(httplib REQUIRED)
+find_package(nlohmann_json REQUIRED)
 
 # Optional packages for testing and examples
 if(VOICE_COMMAND_BUILD_TESTS)
@@ -78,7 +78,8 @@ set(VOICE_COMMAND_SOURCES
     src/testing/command_tester.cpp
     # Engine wrappers
     src/audio_engine.cpp
-    src/whisper_engine.cpp
+    src/local_whisper_engine.cpp
+    src/remote_whisper_engine.cpp
     # Recognition strategies
     src/guided_recognition_strategy.cpp
     src/nlu_recognition_strategy.cpp
@@ -102,7 +103,9 @@ set(VOICE_COMMAND_HEADERS
     include/testing/command_tester.h
     # Engine wrappers
     include/audio_engine.h
-    include/whisper_engine.h
+    include/asr_engine.h
+    include/local_whisper_engine.h
+    include/remote_whisper_engine.h
     # Recognition strategies
     include/recognition_strategy.h
     # Orchestration
@@ -112,11 +115,10 @@ set(VOICE_COMMAND_HEADERS
 
 set(LIBS_TO_LINK
     whisper-cpp::whisper-cpp
-    # audio_capture
+    httplib::httplib
+    nlohmann_json::nlohmann_json
     Qt6::Core
     Qt6::Multimedia
-    # nlohmann_json::nlohmann_json
-    # spdlog::spdlog
 )
 
 # Build options for audio backends

@@ -1,4 +1,4 @@
-#include "whisper_engine.h"
+#include "local_whisper_engine.h"
 
 #include <whisper.h>
 #include <ggml.h>
@@ -112,15 +112,15 @@ std::string Trim(const std::string& str) {
 
 }  // namespace
 
-WhisperEngine::WhisperEngine() = default;
+LocalWhisperEngine::LocalWhisperEngine() = default;
 
-WhisperEngine::~WhisperEngine() {
+LocalWhisperEngine::~LocalWhisperEngine() {
     if (initialized_) {
         Shutdown();
     }
 }
 
-WhisperEngine::WhisperEngine(WhisperEngine&& other) noexcept
+LocalWhisperEngine::LocalWhisperEngine(LocalWhisperEngine&& other) noexcept
     : ctx_(other.ctx_),
       config_(std::move(other.config_)),
       initialized_(other.initialized_) {
@@ -128,7 +128,7 @@ WhisperEngine::WhisperEngine(WhisperEngine&& other) noexcept
     other.initialized_ = false;
 }
 
-WhisperEngine& WhisperEngine::operator=(WhisperEngine&& other) noexcept {
+LocalWhisperEngine& LocalWhisperEngine::operator=(LocalWhisperEngine&& other) noexcept {
     if (this != &other) {
         if (initialized_) {
             Shutdown();
@@ -142,7 +142,7 @@ WhisperEngine& WhisperEngine::operator=(WhisperEngine&& other) noexcept {
     return *this;
 }
 
-bool WhisperEngine::Init(const WhisperEngineConfig& config) {
+bool LocalWhisperEngine::Init(const LocalWhisperEngineConfig& config) {
     if (initialized_) {
         return false;  // Already initialized
     }
@@ -174,7 +174,7 @@ bool WhisperEngine::Init(const WhisperEngineConfig& config) {
     return true;
 }
 
-void WhisperEngine::Shutdown() {
+void LocalWhisperEngine::Shutdown() {
     if (!initialized_) {
         return;
     }
@@ -187,15 +187,15 @@ void WhisperEngine::Shutdown() {
     initialized_ = false;
 }
 
-bool WhisperEngine::IsInitialized() const {
+bool LocalWhisperEngine::IsInitialized() const {
     return initialized_;
 }
 
-const WhisperEngineConfig& WhisperEngine::GetConfig() const {
+const LocalWhisperEngineConfig& LocalWhisperEngine::GetConfig() const {
     return config_;
 }
 
-TranscriptionResult WhisperEngine::Transcribe(
+TranscriptionResult LocalWhisperEngine::Transcribe(
     const audio_capture::AudioSamples& samples) {
     TranscriptionResult result;
 
@@ -272,7 +272,7 @@ TranscriptionResult WhisperEngine::Transcribe(
     return result;
 }
 
-GuidedMatchResult WhisperEngine::GuidedMatch(
+GuidedMatchResult LocalWhisperEngine::GuidedMatch(
     const audio_capture::AudioSamples& samples,
     const std::vector<std::string>& phrases) {
     GuidedMatchResult result;
@@ -427,7 +427,7 @@ GuidedMatchResult WhisperEngine::GuidedMatch(
     return result;
 }
 
-std::string WhisperEngine::BuildGuidedPrompt(
+std::string LocalWhisperEngine::BuildGuidedPrompt(
     const std::vector<std::string>& phrases) const {
     std::ostringstream oss;
     oss << "select one from the available words: ";
@@ -443,7 +443,7 @@ std::string WhisperEngine::BuildGuidedPrompt(
     return oss.str();
 }
 
-std::vector<int> WhisperEngine::TokenizePhrase(const std::string& phrase) const {
+std::vector<int> LocalWhisperEngine::TokenizePhrase(const std::string& phrase) const {
     if (ctx_ == nullptr) {
         return {};
     }

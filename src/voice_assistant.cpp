@@ -7,7 +7,6 @@ namespace voice_command {
 
 VoiceAssistant::VoiceAssistant()
     : audio_engine_(std::make_unique<AudioEngine>()),
-      whisper_engine_(std::make_unique<WhisperEngine>()),
       registry_(std::make_unique<CommandRegistry>()) {}
 
 VoiceAssistant::~VoiceAssistant() {
@@ -19,13 +18,19 @@ VoiceAssistant::~VoiceAssistant() {
     }
 }
 
-bool VoiceAssistant::Init(const VoiceAssistantConfig& config,
-                          std::unique_ptr<INluEngine> nlu_engine) {
+bool VoiceAssistant::Init(IAsrEngine* asr_engine,
+                          std::unique_ptr<INluEngine> nlu_engine,
+                          const VoiceAssistantConfig& config) {
     if (initialized_) {
         return false;  // Already initialized
     }
 
+    if (asr_engine == nullptr || !asr_engine->IsInitialized()) {
+        return false;  // ASR engine must be initialized before passing
+    }
+
     config_ = config;
+    asr_engine_ = asr_engine;
     nlu_engine_ = std::move(nlu_engine);
 
     // Initialize audio engine
@@ -33,15 +38,8 @@ bool VoiceAssistant::Init(const VoiceAssistantConfig& config,
         return false;
     }
 
-    // Initialize whisper engine
-    if (!whisper_engine_->Init(config.whisper_config)) {
-        audio_engine_->Shutdown();
-        return false;
-    }
-
     // Initialize NLU engine if provided
     if (nlu_engine_ && !nlu_engine_->Init()) {
-        whisper_engine_->Shutdown();
         audio_engine_->Shutdown();
         return false;
     }
@@ -65,7 +63,8 @@ void VoiceAssistant::Shutdown() {
     strategy_.reset();
     dispatcher_.reset();
     nlu_engine_.reset();
-    whisper_engine_->Shutdown();
+    // Note: asr_engine_ is not owned, caller is responsible for shutdown
+    asr_engine_ = nullptr;
     audio_engine_->Shutdown();
 
     initialized_ = false;
@@ -270,15 +269,15 @@ void VoiceAssistant::SelectStrategy() {
     if (use_nlu) {
         if (nlu_engine_) {
             strategy_ = std::make_unique<NluRecognitionStrategy>(
-                whisper_engine_.get(), nlu_engine_.get(), registry_.get());
+                asr_engine_, nlu_engine_.get(), registry_.get());
         } else {
             // Fall back to guided if no NLU engine
             strategy_ = std::make_unique<GuidedRecognitionStrategy>(
-                whisper_engine_.get(), registry_.get());
+                asr_engine_, registry_.get());
         }
     } else {
         strategy_ = std::make_unique<GuidedRecognitionStrategy>(
-            whisper_engine_.get(), registry_.get());
+            asr_engine_, registry_.get());
     }
 }
 

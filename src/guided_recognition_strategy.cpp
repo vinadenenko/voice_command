@@ -20,8 +20,8 @@ std::string ToLower(const std::string& str) {
 }  // namespace
 
 GuidedRecognitionStrategy::GuidedRecognitionStrategy(
-    WhisperEngine* whisper_engine, CommandRegistry* registry)
-    : whisper_engine_(whisper_engine), registry_(registry) {
+    IAsrEngine* asr_engine, CommandRegistry* registry)
+    : asr_engine_(asr_engine), registry_(registry) {
     BuildPhraseMap();
 }
 
@@ -54,8 +54,8 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
 
     auto total_start = std::chrono::steady_clock::now();
 
-    if (whisper_engine_ == nullptr || !whisper_engine_->IsInitialized()) {
-        result.error = "Whisper engine not initialized";
+    if (asr_engine_ == nullptr || !asr_engine_->IsInitialized()) {
+        result.error = "ASR engine not initialized";
         return result;
     }
 
@@ -76,7 +76,7 @@ RecognitionResult GuidedRecognitionStrategy::Recognize(
 
     // Perform guided matching (measure ASR time)
     auto asr_start = std::chrono::steady_clock::now();
-    auto match_result = whisper_engine_->GuidedMatch(samples, all_phrases_);
+    auto match_result = asr_engine_->GuidedMatch(samples, all_phrases_);
     auto asr_end = std::chrono::steady_clock::now();
     result.asr_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         asr_end - asr_start).count();

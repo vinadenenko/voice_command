@@ -4,7 +4,10 @@
 #include <QObject>
 #include <QQmlEngine>
 #include <QColor>
+#include <memory>
 #include <qt_voice_assistant.h>
+#include <local_whisper_engine.h>
+#include "remote_whisper_engine.h"
 
 class App : public QObject
 {
@@ -33,6 +36,8 @@ private:
     void initVoiceAssistant();
     void setProcessing(bool processing);
 
+    std::unique_ptr<voice_command::LocalWhisperEngine> localWhisperEngine_;
+    std::unique_ptr<voice_command::RemoteWhisperEngine> remoteWhisperEngine_;
     voice_command::QtVoiceAssistant *assistant_;
     bool isRecording_{false};
     bool isProcessing_{false};

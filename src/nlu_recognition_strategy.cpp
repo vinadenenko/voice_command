@@ -6,12 +6,10 @@
 
 namespace voice_command {
 
-NluRecognitionStrategy::NluRecognitionStrategy(WhisperEngine* whisper_engine,
+NluRecognitionStrategy::NluRecognitionStrategy(IAsrEngine* asr_engine,
                                                INluEngine* nlu_engine,
                                                CommandRegistry* registry)
-    : whisper_engine_(whisper_engine),
-      nlu_engine_(nlu_engine),
-      registry_(registry) {}
+    : asr_engine_(asr_engine), nlu_engine_(nlu_engine), registry_(registry) {}
 
 RecognitionResult NluRecognitionStrategy::Recognize(
     const audio_capture::AudioSamples& samples) {
@@ -19,8 +17,8 @@ RecognitionResult NluRecognitionStrategy::Recognize(
 
     auto total_start = std::chrono::steady_clock::now();
 
-    if (whisper_engine_ == nullptr || !whisper_engine_->IsInitialized()) {
-        result.error = "Whisper engine not initialized";
+    if (asr_engine_ == nullptr || !asr_engine_->IsInitialized()) {
+        result.error = "ASR engine not initialized";
         return result;
     }
 
@@ -36,7 +34,7 @@ RecognitionResult NluRecognitionStrategy::Recognize(
 
     // Step 1: Transcribe audio to text (measure ASR time)
     auto asr_start = std::chrono::steady_clock::now();
-    auto transcription = whisper_engine_->Transcribe(samples);
+    auto transcription = asr_engine_->Transcribe(samples);
     auto asr_end = std::chrono::steady_clock::now();
     result.asr_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
         asr_end - asr_start).count();

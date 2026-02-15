@@ -1,10 +1,11 @@
-#ifndef VOICE_COMMAND_WHISPER_ENGINE_H
-#define VOICE_COMMAND_WHISPER_ENGINE_H
+#ifndef VOICE_COMMAND_LOCAL_WHISPER_ENGINE_H
+#define VOICE_COMMAND_LOCAL_WHISPER_ENGINE_H
 
 #include <memory>
 #include <string>
 #include <vector>
 
+#include "asr_engine.h"
 #include "audio_capture/iaudio_capture.h"
 
 // Forward declaration to avoid whisper.h in public header
@@ -12,8 +13,8 @@ struct whisper_context;
 
 namespace voice_command {
 
-/// Configuration for WhisperEngine
-struct WhisperEngineConfig {
+/// Configuration for LocalWhisperEngine
+struct LocalWhisperEngineConfig {
     /// Path to the whisper model file (.bin or .gguf)
     std::string model_path;
 
@@ -48,55 +49,11 @@ struct WhisperEngineConfig {
     int beam_size = 5;
 };
 
-/// Result of a transcription operation
-struct TranscriptionResult {
-    /// Whether transcription succeeded
-    bool success = false;
-
-    /// Transcribed text (trimmed)
-    std::string text;
-
-    /// Minimum log probability across tokens (for confidence)
-    float logprob_min = 0.0f;
-
-    /// Sum of log probabilities
-    float logprob_sum = 0.0f;
-
-    /// Number of tokens produced
-    int num_tokens = 0;
-
-    /// Processing time in milliseconds
-    int64_t processing_time_ms = 0;
-
-    /// Error message if !success
-    std::string error;
-};
-
-/// Result of a guided matching operation
-struct GuidedMatchResult {
-    /// Whether matching succeeded
-    bool success = false;
-
-    /// Index of the best matching phrase in the input list
-    int best_match_index = -1;
-
-    /// The best matching phrase text
-    std::string best_match;
-
-    /// Probability of the best match (0.0-1.0)
-    float best_score = 0.0f;
-
-    /// Scores for all phrases (same order as input)
-    std::vector<float> all_scores;
-
-    /// Processing time in milliseconds
-    int64_t processing_time_ms = 0;
-
-    /// Error message if !success
-    std::string error;
-};
-
-/// WhisperEngine wraps whisper.cpp providing speech-to-text capabilities.
+/// LocalWhisperEngine wraps whisper.cpp providing local speech-to-text.
+///
+/// This is the local implementation of IAsrEngine using whisper.cpp for
+/// on-device inference. For remote inference via whisper.cpp server,
+/// see RemoteWhisperEngine.
 ///
 /// Responsibilities:
 /// - Manages whisper model loading and context
@@ -105,41 +62,42 @@ struct GuidedMatchResult {
 ///
 /// Thread Safety:
 /// - Single whisper context is NOT thread-safe for concurrent inference
-/// - Use separate WhisperEngine instances for multi-threaded processing
+/// - Use separate LocalWhisperEngine instances for multi-threaded processing
 /// - Init/Shutdown must not be called concurrently with Transcribe/GuidedMatch
-class WhisperEngine {
+class LocalWhisperEngine : public IAsrEngine {
 public:
-    WhisperEngine();
-    ~WhisperEngine();
+    LocalWhisperEngine();
+    ~LocalWhisperEngine() override;
 
     // Non-copyable
-    WhisperEngine(const WhisperEngine&) = delete;
-    WhisperEngine& operator=(const WhisperEngine&) = delete;
+    LocalWhisperEngine(const LocalWhisperEngine&) = delete;
+    LocalWhisperEngine& operator=(const LocalWhisperEngine&) = delete;
 
     // Movable
-    WhisperEngine(WhisperEngine&&) noexcept;
-    WhisperEngine& operator=(WhisperEngine&&) noexcept;
+    LocalWhisperEngine(LocalWhisperEngine&&) noexcept;
+    LocalWhisperEngine& operator=(LocalWhisperEngine&&) noexcept;
 
     /// Initialize the whisper engine with configuration
     /// @param config Engine configuration (model path, settings)
     /// @return true if initialization succeeded
-    bool Init(const WhisperEngineConfig& config);
+    bool Init(const LocalWhisperEngineConfig& config);
 
     /// Release all resources
-    void Shutdown();
+    void Shutdown() override;
 
     /// Check if engine is initialized
     /// @return true if initialized
-    bool IsInitialized() const;
+    bool IsInitialized() const override;
 
     /// Get the current configuration
     /// @return Reference to configuration
-    const WhisperEngineConfig& GetConfig() const;
+    const LocalWhisperEngineConfig& GetConfig() const;
 
     /// Perform general speech-to-text transcription
     /// @param samples Audio samples (float32 mono PCM at 16kHz)
     /// @return Transcription result
-    TranscriptionResult Transcribe(const audio_capture::AudioSamples& samples);
+    TranscriptionResult Transcribe(
+        const audio_capture::AudioSamples& samples) override;
 
     /// Perform guided matching against known phrases
     ///
@@ -150,12 +108,9 @@ public:
     /// @param samples Audio samples (float32 mono PCM at 16kHz)
     /// @param phrases List of candidate phrases to match against
     /// @return Guided match result with best match and scores
-    GuidedMatchResult GuidedMatch(const audio_capture::AudioSamples& samples,
-                                  const std::vector<std::string>& phrases);
-
-    /// Get the sample rate expected by the engine
-    /// @return Sample rate in Hz (always 16000 for whisper)
-    static constexpr int GetExpectedSampleRate() { return 16000; }
+    GuidedMatchResult GuidedMatch(
+        const audio_capture::AudioSamples& samples,
+        const std::vector<std::string>& phrases) override;
 
 private:
     /// Build the prompt for guided matching
@@ -165,10 +120,10 @@ private:
     std::vector<int> TokenizePhrase(const std::string& phrase) const;
 
     whisper_context* ctx_ = nullptr;
-    WhisperEngineConfig config_;
+    LocalWhisperEngineConfig config_;
     bool initialized_ = false;
 };
 
 }  // namespace voice_command
 
-#endif  // VOICE_COMMAND_WHISPER_ENGINE_H
+#endif  // VOICE_COMMAND_LOCAL_WHISPER_ENGINE_H

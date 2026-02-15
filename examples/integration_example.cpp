@@ -14,6 +14,7 @@
 #include <QCoreApplication>
 #include <QTimer>
 #include <qt_voice_assistant.h>
+#include <local_whisper_engine.h>
 
 #include <atomic>
 #include <chrono>
@@ -280,6 +281,28 @@ int main(int argc, char** argv) {
     fprintf(stderr, "==============================================\n");
     fprintf(stderr, "\n");
 
+    fprintf(stderr, "Initializing voice assistant...\n");
+    fprintf(stderr, "  Model: %s\n", app_config.model_path.c_str());
+    fprintf(stderr, "  Threads: %d\n", app_config.num_threads);
+    fprintf(stderr, "  GPU: %s\n", app_config.use_gpu ? "enabled" : "disabled");
+    fprintf(stderr, "  Audio backend: Qt\n");
+    fprintf(stderr, "\n");
+
+    // Initialize Whisper engine first (now managed separately)
+    voice_command::LocalWhisperEngineConfig whisper_config;
+    whisper_config.model_path = app_config.model_path;
+    whisper_config.num_threads = app_config.num_threads;
+    whisper_config.use_gpu = app_config.use_gpu;
+    whisper_config.language = "en";
+
+    voice_command::LocalWhisperEngine whisper_engine;
+    if (!whisper_engine.Init(whisper_config)) {
+        fprintf(stderr, "Failed to initialize Whisper engine!\n");
+        fprintf(stderr, "Make sure the model file exists: %s\n",
+                app_config.model_path.c_str());
+        return 1;
+    }
+
     // Configure audio engine (Qt backend)
     voice_command::audio_capture::AudioCaptureConfig audio_capture_config;
     audio_capture_config.device_id = app_config.capture_device_id;
@@ -289,20 +312,14 @@ int main(int argc, char** argv) {
 
     voice_command::audio_capture::VadConfig vad_config;
     vad_config.window_ms = 1000;
-    vad_config.energy_threshold = 0.1f;
+    vad_config.energy_threshold = 0.5f;
     vad_config.freq_threshold = 100.0f;
     vad_config.sample_rate = 16000;
 
     // Configure voice assistant with Qt audio backend
-    // voice_command::VoiceAssistantConfig config;
     voice_command::QtVoiceAssistantConfig config;
     config.audio_config =
         voice_command::AudioEngine::CreateQtConfig(audio_capture_config, vad_config);
-
-    config.whisper_config.model_path = app_config.model_path;
-    config.whisper_config.num_threads = app_config.num_threads;
-    config.whisper_config.use_gpu = app_config.use_gpu;
-    config.whisper_config.language = "en";
 
     config.vad_check_duration_ms = 2000;
     config.command_capture_duration_ms = 8000;
@@ -312,20 +329,11 @@ int main(int argc, char** argv) {
     // Create NLU engine
     auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
 
-    // Create voice assistant
+    // Create voice assistant (pass ASR engine via dependency injection)
     voice_command::QtVoiceAssistant assistant;
 
-    fprintf(stderr, "Initializing voice assistant...\n");
-    fprintf(stderr, "  Model: %s\n", app_config.model_path.c_str());
-    fprintf(stderr, "  Threads: %d\n", app_config.num_threads);
-    fprintf(stderr, "  GPU: %s\n", app_config.use_gpu ? "enabled" : "disabled");
-    fprintf(stderr, "  Audio backend: Qt\n");
-    fprintf(stderr, "\n");
-
-    if (!assistant.Init(config, std::move(nlu_engine))) {
+    if (!assistant.Init(&whisper_engine, std::move(nlu_engine), config)) {
         fprintf(stderr, "Failed to initialize voice assistant!\n");
-        fprintf(stderr, "Make sure the model file exists: %s\n",
-                app_config.model_path.c_str());
         return 1;
     }
 
@@ -388,6 +396,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "\nStopping voice assistant...\n");
     assistant.Stop();
     assistant.Shutdown();
+    whisper_engine.Shutdown();
 
     fprintf(stderr, "Done.\n");
     return result;

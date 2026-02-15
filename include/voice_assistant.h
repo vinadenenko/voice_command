@@ -10,22 +10,22 @@
 #include <string>
 #include <thread>
 
+#include "asr_engine.h"
 #include "audio_engine.h"
 #include "command/dispatcher/commanddispatcher.h"
 #include "command/nlu/inlu_engine.h"
 #include "command/registry/commandregistry.h"
 #include "recognition_strategy.h"
-#include "whisper_engine.h"
 
 namespace voice_command {
 
 /// Configuration for VoiceAssistant
+///
+/// Note: ASR engine is now injected via Init() rather than configured here.
+/// This allows using different ASR backends (local whisper, remote server, etc.)
 struct VoiceAssistantConfig {
     /// Audio engine configuration
     AudioEngineConfig audio_config;
-
-    /// Whisper engine configuration
-    WhisperEngineConfig whisper_config;
 
     /// Duration of audio to capture for VAD check (milliseconds)
     int vad_check_duration_ms = 2000;
@@ -60,7 +60,7 @@ using SpeechDetectedCallback = std::function<void()>;
 /// It manages the complete pipeline:
 /// - Audio capture in a dedicated thread
 /// - Voice activity detection
-/// - Speech recognition via WhisperEngine
+/// - Speech recognition via IAsrEngine (injected)
 /// - Intent/parameter extraction via recognition strategy
 /// - Command dispatch via CommandDispatcher
 ///
@@ -85,11 +85,13 @@ public:
     VoiceAssistant& operator=(VoiceAssistant&&) = delete;
 
     /// Initialize the voice assistant
-    /// @param config Configuration for all components
+    /// @param asr_engine ASR engine for speech-to-text (not owned, must outlive)
     /// @param nlu_engine NLU engine to use (takes ownership)
+    /// @param config Configuration for other components
     /// @return true if initialization succeeded
-    bool Init(const VoiceAssistantConfig& config,
-              std::unique_ptr<INluEngine> nlu_engine);
+    bool Init(IAsrEngine* asr_engine,
+              std::unique_ptr<INluEngine> nlu_engine,
+              const VoiceAssistantConfig& config);
 
     /// Shutdown and release all resources
     void Shutdown();
@@ -161,7 +163,7 @@ private:
 
     // Core components
     std::unique_ptr<AudioEngine> audio_engine_;
-    std::unique_ptr<WhisperEngine> whisper_engine_;
+    IAsrEngine* asr_engine_ = nullptr;  // Not owned, injected via Init()
     std::unique_ptr<INluEngine> nlu_engine_;
     std::unique_ptr<CommandRegistry> registry_;
     std::unique_ptr<CommandDispatcher> dispatcher_;

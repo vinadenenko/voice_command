@@ -12,7 +12,6 @@ namespace voice_command {
 QtVoiceAssistant::QtVoiceAssistant(QObject* parent)
     : QObject(parent),
       audio_engine_(std::make_unique<AudioEngine>()),
-      whisper_engine_(std::make_unique<WhisperEngine>()),
       registry_(std::make_unique<CommandRegistry>()) {
     // Create the audio timer
     audio_timer_ = new QTimer(this);
@@ -28,14 +27,21 @@ QtVoiceAssistant::~QtVoiceAssistant() {
     }
 }
 
-bool QtVoiceAssistant::Init(const QtVoiceAssistantConfig& config,
-                            std::unique_ptr<INluEngine> nlu_engine) {
+bool QtVoiceAssistant::Init(IAsrEngine* asr_engine,
+                            std::unique_ptr<INluEngine> nlu_engine,
+                            const QtVoiceAssistantConfig& config) {
     if (initialized_) {
         qWarning() << "[QtVoiceAssistant] ERROR: Already initialized";
         return false;
     }
 
+    if (asr_engine == nullptr || !asr_engine->IsInitialized()) {
+        qWarning() << "[QtVoiceAssistant] ERROR: ASR engine must be initialized";
+        return false;
+    }
+
     config_ = config;
+    asr_engine_ = asr_engine;
     nlu_engine_ = std::move(nlu_engine);
 
     // Initialize audio engine
@@ -44,17 +50,9 @@ bool QtVoiceAssistant::Init(const QtVoiceAssistantConfig& config,
         return false;
     }
 
-    // Initialize whisper engine
-    if (!whisper_engine_->Init(config.whisper_config)) {
-        qWarning() << "[QtVoiceAssistant] ERROR: Whisper engine init failed";
-        audio_engine_->Shutdown();
-        return false;
-    }
-
     // Initialize NLU engine if provided
     if (nlu_engine_ && !nlu_engine_->Init()) {
         qWarning() << "[QtVoiceAssistant] ERROR: NLU engine init failed";
-        whisper_engine_->Shutdown();
         audio_engine_->Shutdown();
         return false;
     }
@@ -78,7 +76,8 @@ void QtVoiceAssistant::Shutdown() {
     strategy_.reset();
     dispatcher_.reset();
     nlu_engine_.reset();
-    whisper_engine_->Shutdown();
+    // Note: asr_engine_ is not owned, caller is responsible for shutdown
+    asr_engine_ = nullptr;
     audio_engine_->Shutdown();
 
     initialized_ = false;
@@ -323,7 +322,7 @@ void QtVoiceAssistant::OnAudioTimer_WakeWord() {
 
         if (vad_result.speech_ended) {
             // Check if speech matches wake word
-            auto match = whisper_engine_->GuidedMatch(samples, {config_.wake_word});
+            auto match = asr_engine_->GuidedMatch(samples, {config_.wake_word});
 
             if (match.success && match.best_score >= config_.wake_word_confidence) {
                 qDebug() << "[QtVoiceAssistant] Wake word detected:"
@@ -414,15 +413,15 @@ void QtVoiceAssistant::SelectStrategy() {
     if (use_nlu) {
         if (nlu_engine_) {
             strategy_ = std::make_unique<NluRecognitionStrategy>(
-                whisper_engine_.get(), nlu_engine_.get(), registry_.get());
+                asr_engine_, nlu_engine_.get(), registry_.get());
         } else {
             // Fall back to guided if no NLU engine
             strategy_ = std::make_unique<GuidedRecognitionStrategy>(
-                whisper_engine_.get(), registry_.get());
+                asr_engine_, registry_.get());
         }
     } else {
         strategy_ = std::make_unique<GuidedRecognitionStrategy>(
-            whisper_engine_.get(), registry_.get());
+            asr_engine_, registry_.get());
     }
 }
 

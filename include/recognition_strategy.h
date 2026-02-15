@@ -6,11 +6,11 @@
 #include <string>
 #include <unordered_map>
 
+#include "asr_engine.h"
 #include "audio_capture/iaudio_capture.h"
 #include "command/context/commandcontext.h"
 #include "command/nlu/inlu_engine.h"
 #include "command/registry/commandregistry.h"
-#include "whisper_engine.h"
 
 namespace voice_command {
 
@@ -60,7 +60,7 @@ public:
     virtual std::string GetName() const = 0;
 };
 
-/// GuidedRecognitionStrategy uses whisper's guided matching for simple commands.
+/// GuidedRecognitionStrategy uses ASR guided matching for simple commands.
 ///
 /// This strategy is optimal when:
 /// - All commands are simple (no parameters)
@@ -69,14 +69,14 @@ public:
 ///
 /// Algorithm:
 /// 1. Get all trigger phrases from registry
-/// 2. Use WhisperEngine::GuidedMatch to score audio against phrases
+/// 2. Use IAsrEngine::GuidedMatch to score audio against phrases
 /// 3. Map best matching phrase back to command name
 class GuidedRecognitionStrategy : public IRecognitionStrategy {
 public:
     /// Create a guided recognition strategy
-    /// @param whisper_engine Pointer to whisper engine (not owned)
+    /// @param asr_engine Pointer to ASR engine (not owned)
     /// @param registry Pointer to command registry (not owned)
-    explicit GuidedRecognitionStrategy(WhisperEngine* whisper_engine,
+    explicit GuidedRecognitionStrategy(IAsrEngine* asr_engine,
                                        CommandRegistry* registry);
 
     ~GuidedRecognitionStrategy() override = default;
@@ -102,8 +102,8 @@ private:
     /// Build the mapping from trigger phrase to command name
     void BuildPhraseMap();
 
-    WhisperEngine* whisper_engine_;  // Not owned
-    CommandRegistry* registry_;      // Not owned
+    IAsrEngine* asr_engine_;     // Not owned
+    CommandRegistry* registry_;  // Not owned
 
     /// Map from trigger phrase (lowercase) to command name
     std::unordered_map<std::string, std::string> phrase_to_command_;
@@ -122,16 +122,16 @@ private:
 /// - More sophisticated understanding is needed
 ///
 /// Algorithm:
-/// 1. Use WhisperEngine::Transcribe to get text
+/// 1. Use IAsrEngine::Transcribe to get text
 /// 2. Pass transcript to INluEngine::Process with command schemas
 /// 3. Return identified command with extracted parameters
 class NluRecognitionStrategy : public IRecognitionStrategy {
 public:
     /// Create an NLU recognition strategy
-    /// @param whisper_engine Pointer to whisper engine (not owned)
+    /// @param asr_engine Pointer to ASR engine (not owned)
     /// @param nlu_engine Pointer to NLU engine (not owned)
     /// @param registry Pointer to command registry (not owned)
-    NluRecognitionStrategy(WhisperEngine* whisper_engine,
+    NluRecognitionStrategy(IAsrEngine* asr_engine,
                            INluEngine* nlu_engine,
                            CommandRegistry* registry);
 
@@ -159,9 +159,9 @@ public:
     }
 
 private:
-    WhisperEngine* whisper_engine_;  // Not owned
-    INluEngine* nlu_engine_;         // Not owned
-    CommandRegistry* registry_;      // Not owned
+    IAsrEngine* asr_engine_;     // Not owned
+    INluEngine* nlu_engine_;     // Not owned
+    CommandRegistry* registry_;  // Not owned
 
     float min_transcription_confidence_ = 0.0f;  // Use any transcription
     float min_nlu_confidence_ = 0.3f;

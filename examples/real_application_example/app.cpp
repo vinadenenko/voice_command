@@ -15,6 +15,7 @@ App::App(QObject *parent)
 App::~App()
 {
     delete assistant_;
+    // whisper_engine_ cleaned up by unique_ptr
 }
 
 bool App::isRecording() const
@@ -190,6 +191,31 @@ void RegisterCommands(voice_command::CommandRegistry* registry) {
 void App::initVoiceAssistant()
 {
     AppConfig app_config;
+
+    // Initialize Whisper engine first (now managed separately)
+    voice_command::LocalWhisperEngineConfig whisper_config;
+    whisper_config.model_path = app_config.model_path;
+    whisper_config.num_threads = app_config.num_threads;
+    whisper_config.use_gpu = app_config.use_gpu;
+    whisper_config.language = "en";
+
+    localWhisperEngine_ = std::make_unique<voice_command::LocalWhisperEngine>();
+    if (!localWhisperEngine_->Init(whisper_config)) {
+        qDebug() << "Failed to initialize local Whisper engine!";
+        qDebug() << "Make sure the model file exists:" << app_config.model_path.c_str();
+        return;
+    }
+
+    // remoteWhisperEngine_ = std::make_unique<voice_command::RemoteWhisperEngine>();
+    // voice_command::RemoteAsrConfig remote_whisper_config;
+    // remote_whisper_config.server_url = "http://127.0.0.1:8080";
+
+    // if (!remoteWhisperEngine_->Init(remote_whisper_config)) {
+        // qDebug() << "Failed to initialize remote Whisper engine!";
+        // return;
+    // }
+
+
     // Configure audio engine (Qt backend)
     voice_command::audio_capture::AudioCaptureConfig audio_capture_config;
     audio_capture_config.device_id = app_config.capture_device_id;
@@ -204,15 +230,9 @@ void App::initVoiceAssistant()
     vad_config.sample_rate = 16000;
 
     // Configure voice assistant with Qt audio backend
-    // voice_command::VoiceAssistantConfig config;
     voice_command::QtVoiceAssistantConfig config;
     config.audio_config =
         voice_command::AudioEngine::CreateQtConfig(audio_capture_config, vad_config);
-
-    config.whisper_config.model_path = app_config.model_path;
-    config.whisper_config.num_threads = app_config.num_threads;
-    config.whisper_config.use_gpu = app_config.use_gpu;
-    config.whisper_config.language = "en";
 
     config.vad_check_duration_ms = 2000;
     config.command_capture_duration_ms = 8000;
@@ -224,12 +244,10 @@ void App::initVoiceAssistant()
     // Create NLU engine
     auto nlu_engine = std::make_unique<voice_command::RuleBasedNluEngine>();
 
-    // // Create voice assistant
+    // Create voice assistant (pass ASR engine via dependency injection)
     assistant_ = new voice_command::QtVoiceAssistant;
-    if (!assistant_->Init(config, std::move(nlu_engine))) {
+    if (!assistant_->Init(localWhisperEngine_.get() /*remoteWhisperEngine_.get()*/, std::move(nlu_engine), config)) {
         fprintf(stderr, "Failed to initialize voice assistant!\n");
-        fprintf(stderr, "Make sure the model file exists: %s\n",
-                app_config.model_path.c_str());
         return;
     }
 
@@ -285,6 +303,6 @@ void App::initVoiceAssistant()
             fprintf(stderr, "[Error: %s]\n", error.c_str());
         });
 
-    qDebug() << "[Debug] beam_size:" << config.whisper_config.beam_size;
+    qDebug() << "[Debug] beam_size:" << whisper_config.beam_size;
     assistant_->Start();
 }
